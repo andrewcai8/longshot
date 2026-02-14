@@ -1,14 +1,14 @@
 # GLM-5 SGLang Server Configuration
-# Based on modal-projects/modal-jazz reference
+# Matches SGLang cookbook: https://cookbook.sglang.io/autoregressive/GLM/GLM-5
 
-# General Config
+# General
 host: 0.0.0.0
 log-level: debug
 dist-timeout: 3600
 
-# Model Config
+# Model
 tool-call-parser: glm47
-reasoning-parser: deepseek-r1
+reasoning-parser: glm45
 trust-remote-code: true
 
 # Memory
@@ -24,5 +24,8 @@ collect-tokens-histogram: true
 max-running-requests: 32
 cuda-graph-max-bs: 32
 
-# SpecDec (speed up low/moderate concurrency)
+# Speculative Decoding (EAGLE) — matches cookbook defaults
 speculative-algorithm: EAGLE
+speculative-num-steps: 3
+speculative-eagle-topk: 1
+speculative-num-draft-tokens: 4
