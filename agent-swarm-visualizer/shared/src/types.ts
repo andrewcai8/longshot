@@ -162,6 +162,39 @@ export interface QueryEventsResponse {
   events: AnyEventEnvelope[];
 }
 
+export type LogEventRecord<T extends EventType = EventType> = {
+  eventId?: string;
+  offsetMs: number;
+  type: T;
+  payload: EventPayloadMap[T];
+};
+
+export type AnyLogEventRecord = {
+  [K in EventType]: LogEventRecord<K>;
+}[EventType];
+
+export interface RunLogSpec {
+  schemaVersion: "1.0";
+  name?: string;
+  description?: string;
+  baseTime?: number;
+  events: AnyLogEventRecord[];
+}
+
+export interface ImportLogRequest {
+  runId?: string;
+  name?: string;
+  baseTime?: number;
+  log: RunLogSpec;
+}
+
+export interface ImportLogResponse {
+  ok: true;
+  runId: string;
+  inserted: number;
+  createdRun: boolean;
+}
+
 export interface AgentStateDerived {
   agentId: string;
   role: AgentRole;

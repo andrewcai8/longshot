@@ -118,7 +118,7 @@ const eventByTypeSchema = {
   "tests.result": z.object({ type: z.literal("tests.result"), payload: testsResultPayloadSchema })
 };
 
-const eventUnionSchema = z.discriminatedUnion("type", [
+export const eventUnionSchema = z.discriminatedUnion("type", [
   eventByTypeSchema["agent.spawned"],
   eventByTypeSchema["agent.state_changed"],
   eventByTypeSchema["task.created"],
@@ -147,6 +147,28 @@ export const createRunRequestSchema = z.object({
 export const appendEventsRequestSchema = z.object({
   runId: z.string().min(1),
   events: z.array(eventEnvelopeSchema)
+});
+
+export const logEventRecordSchema = z
+  .object({
+    eventId: z.string().min(1).optional(),
+    offsetMs: z.number().int().nonnegative()
+  })
+  .and(eventUnionSchema);
+
+export const runLogSpecSchema = z.object({
+  schemaVersion: z.literal("1.0"),
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  baseTime: z.number().int().nonnegative().optional(),
+  events: z.array(logEventRecordSchema).min(1)
+});
+
+export const importLogRequestSchema = z.object({
+  runId: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  baseTime: z.number().int().nonnegative().optional(),
+  log: runLogSpecSchema
 });
 
 export const agentCreateRequestSchema = z.object({

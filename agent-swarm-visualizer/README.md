@@ -35,6 +35,8 @@ Local-first, event-sourced dashboard for agent swarm runs.
 - Seed a demo run:
   - `pnpm seed`
   - Default seed runs at `1x` for `60s` and generates `20` planner-tree agents, `10` active git branches, and `30` commits.
+- Import a run from log file spec:
+  - `pnpm seed:log -- --log-file dummy-swarm/logs/sample-log.v1.json --run-name "Uploaded Log Demo"`
 
 ## Run (one command per service)
 
@@ -45,6 +47,9 @@ Local-first, event-sourced dashboard for agent swarm runs.
 - Dummy swarm only:
   - `pnpm --filter dummy-swarm dev -- --run-name "Demo Run" --seed 1 --speed 1 --duration 60`
   - The dummy swarm exercises convenience APIs (`/v1/agents/*`, `/v1/tasks/*`, `/v1/git/*`, `/v1/tests/result`) and uses `/v1/events` for tool-call events.
+  - Log-file mode uploads a spec file to `/v1/logs/import`:
+  - `pnpm --filter dummy-swarm dev -- --log-file dummy-swarm/logs/sample-log.v1.json --run-name "Uploaded Log Demo"`
+  - Included sample log file: `dummy-swarm/logs/sample-log.v1.json` (10 agents, 20 commits)
 
 ## URLs
 
@@ -67,6 +72,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
 - `--speed` replay acceleration (higher is faster)
 - `--duration` simulated timeline duration in seconds
 - `--base-time` optional base timestamp (epoch ms or ISO date)
+- `--log-file` path to a log spec JSON file; when provided, dummy-swarm imports the log to backend via `/v1/logs/import` and exits
 
 Example:
 
@@ -78,6 +84,8 @@ pnpm --filter dummy-swarm dev -- --run-name "Treehacks Demo" --seed 42 --speed 3
 
 Detailed backend API contract (human + model-readable JSON):
 - `docs/API_BACKEND_CONTRACT.md`
+Detailed log-spec and log import contract:
+- `docs/LOG_API_CONTRACT.md`
 
 Implemented endpoints:
 
@@ -87,6 +95,8 @@ Implemented endpoints:
   - Lists all runs (newest first) with `runId`, `name`, and `createdAt`.
 - `POST /v1/events`
   - Appends one or more event envelopes to the immutable event log for a run.
+- `POST /v1/logs/import`
+  - Imports a structured log file (`RunLogSpec`), creates a run if needed, and appends translated events.
 - `GET /v1/events?runId=...&until=...`
   - Returns raw events for replay; `until` limits to events at/before a timestamp.
 - `GET /v1/state?runId=...&at=...`

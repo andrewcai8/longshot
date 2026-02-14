@@ -1,0 +1,1143 @@
+{
+  "schemaVersion": "1.0",
+  "name": "Sample Uploaded Log (10 agents / 20 commits)",
+  "description": "Example log-spec file for /v1/logs/import. Contains 10 agents and 20 commits.",
+  "baseTime": 1760000000000,
+  "events": [
+    {
+      "offsetMs": 0,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-root",
+        "role": "root_planner",
+        "name": "Root Planner"
+      }
+    },
+    {
+      "offsetMs": 650,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-plan-a",
+        "role": "planner",
+        "parentAgentId": "agent-root",
+        "name": "Planner A"
+      }
+    },
+    {
+      "offsetMs": 1300,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-plan-b",
+        "role": "planner",
+        "parentAgentId": "agent-root",
+        "name": "Planner B"
+      }
+    },
+    {
+      "offsetMs": 1950,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-sub-a1",
+        "role": "subplanner",
+        "parentAgentId": "agent-plan-a",
+        "name": "Subplanner A1"
+      }
+    },
+    {
+      "offsetMs": 2600,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-sub-b1",
+        "role": "subplanner",
+        "parentAgentId": "agent-plan-b",
+        "name": "Subplanner B1"
+      }
+    },
+    {
+      "offsetMs": 3250,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-worker-ui",
+        "role": "worker",
+        "parentAgentId": "agent-sub-a1",
+        "name": "Worker UI"
+      }
+    },
+    {
+      "offsetMs": 3900,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-worker-api",
+        "role": "worker",
+        "parentAgentId": "agent-sub-a1",
+        "name": "Worker API"
+      }
+    },
+    {
+      "offsetMs": 4550,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-worker-tests",
+        "role": "worker",
+        "parentAgentId": "agent-sub-b1",
+        "name": "Worker Tests"
+      }
+    },
+    {
+      "offsetMs": 5200,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-worker-docs",
+        "role": "worker",
+        "parentAgentId": "agent-plan-b",
+        "name": "Worker Docs"
+      }
+    },
+    {
+      "offsetMs": 5850,
+      "type": "agent.spawned",
+      "payload": {
+        "agentId": "agent-worker-ops",
+        "role": "worker",
+        "parentAgentId": "agent-root",
+        "name": "Worker Ops"
+      }
+    },
+    {
+      "offsetMs": 7500,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-root",
+        "state": "thinking",
+        "note": "Parsing uploaded log"
+      }
+    },
+    {
+      "offsetMs": 9000,
+      "type": "task.created",
+      "payload": {
+        "taskId": "task-ui",
+        "ownerPlannerId": "agent-plan-a",
+        "title": "UI lane rendering"
+      }
+    },
+    {
+      "offsetMs": 9120,
+      "type": "task.assigned",
+      "payload": {
+        "taskId": "task-ui",
+        "agentId": "agent-worker-ui"
+      }
+    },
+    {
+      "offsetMs": 9260,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-ui",
+        "status": "in_progress"
+      }
+    },
+    {
+      "offsetMs": 9900,
+      "type": "task.created",
+      "payload": {
+        "taskId": "task-api",
+        "ownerPlannerId": "agent-plan-a",
+        "title": "Event API hardening"
+      }
+    },
+    {
+      "offsetMs": 10020,
+      "type": "task.assigned",
+      "payload": {
+        "taskId": "task-api",
+        "agentId": "agent-worker-api"
+      }
+    },
+    {
+      "offsetMs": 10160,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-api",
+        "status": "in_progress"
+      }
+    },
+    {
+      "offsetMs": 10800,
+      "type": "task.created",
+      "payload": {
+        "taskId": "task-tests",
+        "ownerPlannerId": "agent-plan-b",
+        "title": "Replay test matrix"
+      }
+    },
+    {
+      "offsetMs": 10920,
+      "type": "task.assigned",
+      "payload": {
+        "taskId": "task-tests",
+        "agentId": "agent-worker-tests"
+      }
+    },
+    {
+      "offsetMs": 11060,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-tests",
+        "status": "in_progress"
+      }
+    },
+    {
+      "offsetMs": 11700,
+      "type": "task.created",
+      "payload": {
+        "taskId": "task-docs",
+        "ownerPlannerId": "agent-plan-b",
+        "title": "Log API documentation"
+      }
+    },
+    {
+      "offsetMs": 11820,
+      "type": "task.assigned",
+      "payload": {
+        "taskId": "task-docs",
+        "agentId": "agent-worker-docs"
+      }
+    },
+    {
+      "offsetMs": 11960,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-docs",
+        "status": "in_progress"
+      }
+    },
+    {
+      "offsetMs": 13000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000001",
+        "parents": [],
+        "branch": "main",
+        "agentId": "agent-worker-api",
+        "taskId": "task-api",
+        "message": "feat: bootstrap backend schema",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-01.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-01.ts\n+++ b/src/main/module-01.ts\n@@ -1,2 +1,3 @@\n-export const old_1 = true;\n+export const old_1 = false;\n+export const next_1 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-01.ts b/src/main/module-01.ts\n--- a/src/main/module-01.ts\n+++ b/src/main/module-01.ts\n@@ -1,2 +1,3 @@\n-export const old_1 = true;\n+export const old_1 = false;\n+export const next_1 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 13045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000001"
+      }
+    },
+    {
+      "offsetMs": 14500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000002",
+        "parents": [
+          "0000000000000000000000000000000000000001"
+        ],
+        "branch": "feature/ui",
+        "agentId": "agent-worker-ui",
+        "taskId": "task-ui",
+        "message": "feat: initial planner tree pane",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-ui/module-02.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-ui/module-02.ts\n+++ b/src/feature-ui/module-02.ts\n@@ -1,2 +1,3 @@\n-export const old_2 = true;\n+export const old_2 = false;\n+export const next_2 = \"feature/ui\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-ui/module-02.ts b/src/feature-ui/module-02.ts\n--- a/src/feature-ui/module-02.ts\n+++ b/src/feature-ui/module-02.ts\n@@ -1,2 +1,3 @@\n-export const old_2 = true;\n+export const old_2 = false;\n+export const next_2 = \"feature/ui\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 14545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/ui",
+        "sha": "0000000000000000000000000000000000000002"
+      }
+    },
+    {
+      "offsetMs": 14590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000002",
+        "suite": "branch-regression",
+        "ok": true,
+        "durationMs": 850,
+        "output": "tests for commit 2"
+      }
+    },
+    {
+      "offsetMs": 16000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000003",
+        "parents": [
+          "0000000000000000000000000000000000000001"
+        ],
+        "branch": "feature/api",
+        "agentId": "agent-worker-api",
+        "taskId": "task-api",
+        "message": "feat: append event validation",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-api/module-03.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-api/module-03.ts\n+++ b/src/feature-api/module-03.ts\n@@ -1,2 +1,3 @@\n-export const old_3 = true;\n+export const old_3 = false;\n+export const next_3 = \"feature/api\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-api/module-03.ts b/src/feature-api/module-03.ts\n--- a/src/feature-api/module-03.ts\n+++ b/src/feature-api/module-03.ts\n@@ -1,2 +1,3 @@\n-export const old_3 = true;\n+export const old_3 = false;\n+export const next_3 = \"feature/api\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 16045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/api",
+        "sha": "0000000000000000000000000000000000000003"
+      }
+    },
+    {
+      "offsetMs": 17500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000004",
+        "parents": [
+          "0000000000000000000000000000000000000001"
+        ],
+        "branch": "feature/replay",
+        "agentId": "agent-worker-tests",
+        "taskId": "task-tests",
+        "message": "feat: replay state reducer",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-replay/module-04.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-replay/module-04.ts\n+++ b/src/feature-replay/module-04.ts\n@@ -1,2 +1,3 @@\n-export const old_4 = true;\n+export const old_4 = false;\n+export const next_4 = \"feature/replay\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-replay/module-04.ts b/src/feature-replay/module-04.ts\n--- a/src/feature-replay/module-04.ts\n+++ b/src/feature-replay/module-04.ts\n@@ -1,2 +1,3 @@\n-export const old_4 = true;\n+export const old_4 = false;\n+export const next_4 = \"feature/replay\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 17545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/replay",
+        "sha": "0000000000000000000000000000000000000004"
+      }
+    },
+    {
+      "offsetMs": 17590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000004",
+        "suite": "branch-regression",
+        "ok": true,
+        "durationMs": 900,
+        "output": "tests for commit 4"
+      }
+    },
+    {
+      "offsetMs": 19000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000005",
+        "parents": [
+          "0000000000000000000000000000000000000001"
+        ],
+        "branch": "main",
+        "agentId": "agent-worker-ops",
+        "taskId": "task-api",
+        "message": "chore: sqlite performance tuning",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-05.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-05.ts\n+++ b/src/main/module-05.ts\n@@ -1,2 +1,3 @@\n-export const old_5 = true;\n+export const old_5 = false;\n+export const next_5 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-05.ts b/src/main/module-05.ts\n--- a/src/main/module-05.ts\n+++ b/src/main/module-05.ts\n@@ -1,2 +1,3 @@\n-export const old_5 = true;\n+export const old_5 = false;\n+export const next_5 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 19045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000005"
+      }
+    },
+    {
+      "offsetMs": 20500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000006",
+        "parents": [
+          "0000000000000000000000000000000000000002"
+        ],
+        "branch": "feature/ui",
+        "agentId": "agent-worker-ui",
+        "taskId": "task-ui",
+        "message": "feat: timeline lane zoom",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-ui/module-06.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-ui/module-06.ts\n+++ b/src/feature-ui/module-06.ts\n@@ -1,2 +1,3 @@\n-export const old_6 = true;\n+export const old_6 = false;\n+export const next_6 = \"feature/ui\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-ui/module-06.ts b/src/feature-ui/module-06.ts\n--- a/src/feature-ui/module-06.ts\n+++ b/src/feature-ui/module-06.ts\n@@ -1,2 +1,3 @@\n-export const old_6 = true;\n+export const old_6 = false;\n+export const next_6 = \"feature/ui\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 20545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/ui",
+        "sha": "0000000000000000000000000000000000000006"
+      }
+    },
+    {
+      "offsetMs": 20590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000006",
+        "suite": "branch-regression",
+        "ok": true,
+        "durationMs": 950,
+        "output": "tests for commit 6"
+      }
+    },
+    {
+      "offsetMs": 22000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000007",
+        "parents": [
+          "0000000000000000000000000000000000000003"
+        ],
+        "branch": "feature/api",
+        "agentId": "agent-worker-api",
+        "taskId": "task-api",
+        "message": "feat: convenience task endpoints",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-api/module-07.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-api/module-07.ts\n+++ b/src/feature-api/module-07.ts\n@@ -1,2 +1,3 @@\n-export const old_7 = true;\n+export const old_7 = false;\n+export const next_7 = \"feature/api\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-api/module-07.ts b/src/feature-api/module-07.ts\n--- a/src/feature-api/module-07.ts\n+++ b/src/feature-api/module-07.ts\n@@ -1,2 +1,3 @@\n-export const old_7 = true;\n+export const old_7 = false;\n+export const next_7 = \"feature/api\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 22045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/api",
+        "sha": "0000000000000000000000000000000000000007"
+      }
+    },
+    {
+      "offsetMs": 23500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000008",
+        "parents": [
+          "0000000000000000000000000000000000000005",
+          "0000000000000000000000000000000000000006"
+        ],
+        "branch": "main",
+        "agentId": "agent-plan-a",
+        "taskId": "task-ui",
+        "message": "merge: ui lane work into main",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-08.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-08.ts\n+++ b/src/main/module-08.ts\n@@ -1,2 +1,3 @@\n-export const old_8 = true;\n+export const old_8 = false;\n+export const next_8 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-08.ts b/src/main/module-08.ts\n--- a/src/main/module-08.ts\n+++ b/src/main/module-08.ts\n@@ -1,2 +1,3 @@\n-export const old_8 = true;\n+export const old_8 = false;\n+export const next_8 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 23545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000008"
+      }
+    },
+    {
+      "offsetMs": 23590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000008",
+        "suite": "main-regression",
+        "ok": true,
+        "durationMs": 1000,
+        "output": "tests for commit 8"
+      }
+    },
+    {
+      "offsetMs": 25000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000009",
+        "parents": [
+          "0000000000000000000000000000000000000005"
+        ],
+        "branch": "feature/tests",
+        "agentId": "agent-worker-tests",
+        "taskId": "task-tests",
+        "message": "feat: baseline replay tests",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-tests/module-09.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-tests/module-09.ts\n+++ b/src/feature-tests/module-09.ts\n@@ -1,2 +1,3 @@\n-export const old_9 = true;\n+export const old_9 = false;\n+export const next_9 = \"feature/tests\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-tests/module-09.ts b/src/feature-tests/module-09.ts\n--- a/src/feature-tests/module-09.ts\n+++ b/src/feature-tests/module-09.ts\n@@ -1,2 +1,3 @@\n-export const old_9 = true;\n+export const old_9 = false;\n+export const next_9 = \"feature/tests\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 25045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/tests",
+        "sha": "0000000000000000000000000000000000000009"
+      }
+    },
+    {
+      "offsetMs": 26500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000a",
+        "parents": [
+          "0000000000000000000000000000000000000008"
+        ],
+        "branch": "main",
+        "agentId": "agent-worker-docs",
+        "taskId": "task-docs",
+        "message": "docs: update event model overview",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-10.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-10.ts\n+++ b/src/main/module-10.ts\n@@ -1,2 +1,3 @@\n-export const old_10 = true;\n+export const old_10 = false;\n+export const next_10 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-10.ts b/src/main/module-10.ts\n--- a/src/main/module-10.ts\n+++ b/src/main/module-10.ts\n@@ -1,2 +1,3 @@\n-export const old_10 = true;\n+export const old_10 = false;\n+export const next_10 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 26545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "000000000000000000000000000000000000000a"
+      }
+    },
+    {
+      "offsetMs": 26590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000a",
+        "suite": "main-regression",
+        "ok": false,
+        "durationMs": 1050,
+        "output": "tests for commit 10"
+      }
+    },
+    {
+      "offsetMs": 28000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000b",
+        "parents": [
+          "0000000000000000000000000000000000000004"
+        ],
+        "branch": "feature/replay",
+        "agentId": "agent-worker-tests",
+        "taskId": "task-tests",
+        "message": "feat: scrubber speed controls",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-replay/module-11.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-replay/module-11.ts\n+++ b/src/feature-replay/module-11.ts\n@@ -1,2 +1,3 @@\n-export const old_11 = true;\n+export const old_11 = false;\n+export const next_11 = \"feature/replay\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-replay/module-11.ts b/src/feature-replay/module-11.ts\n--- a/src/feature-replay/module-11.ts\n+++ b/src/feature-replay/module-11.ts\n@@ -1,2 +1,3 @@\n-export const old_11 = true;\n+export const old_11 = false;\n+export const next_11 = \"feature/replay\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 28045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/replay",
+        "sha": "000000000000000000000000000000000000000b"
+      }
+    },
+    {
+      "offsetMs": 29500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000c",
+        "parents": [
+          "000000000000000000000000000000000000000a",
+          "0000000000000000000000000000000000000007"
+        ],
+        "branch": "main",
+        "agentId": "agent-plan-b",
+        "taskId": "task-api",
+        "message": "merge: api wrappers into main",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-12.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-12.ts\n+++ b/src/main/module-12.ts\n@@ -1,2 +1,3 @@\n-export const old_12 = true;\n+export const old_12 = false;\n+export const next_12 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-12.ts b/src/main/module-12.ts\n--- a/src/main/module-12.ts\n+++ b/src/main/module-12.ts\n@@ -1,2 +1,3 @@\n-export const old_12 = true;\n+export const old_12 = false;\n+export const next_12 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 29545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "000000000000000000000000000000000000000c"
+      }
+    },
+    {
+      "offsetMs": 29590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000c",
+        "suite": "main-regression",
+        "ok": true,
+        "durationMs": 1100,
+        "output": "tests for commit 12"
+      }
+    },
+    {
+      "offsetMs": 31000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000d",
+        "parents": [
+          "0000000000000000000000000000000000000006"
+        ],
+        "branch": "feature/ui",
+        "agentId": "agent-worker-ui",
+        "taskId": "task-ui",
+        "message": "feat: clickable commit selection sync",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-ui/module-13.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-ui/module-13.ts\n+++ b/src/feature-ui/module-13.ts\n@@ -1,2 +1,3 @@\n-export const old_13 = true;\n+export const old_13 = false;\n+export const next_13 = \"feature/ui\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-ui/module-13.ts b/src/feature-ui/module-13.ts\n--- a/src/feature-ui/module-13.ts\n+++ b/src/feature-ui/module-13.ts\n@@ -1,2 +1,3 @@\n-export const old_13 = true;\n+export const old_13 = false;\n+export const next_13 = \"feature/ui\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 31045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/ui",
+        "sha": "000000000000000000000000000000000000000d"
+      }
+    },
+    {
+      "offsetMs": 32500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000e",
+        "parents": [
+          "000000000000000000000000000000000000000c",
+          "000000000000000000000000000000000000000b"
+        ],
+        "branch": "main",
+        "agentId": "agent-plan-a",
+        "taskId": "task-tests",
+        "message": "merge: replay controls to main",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-14.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-14.ts\n+++ b/src/main/module-14.ts\n@@ -1,2 +1,3 @@\n-export const old_14 = true;\n+export const old_14 = false;\n+export const next_14 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-14.ts b/src/main/module-14.ts\n--- a/src/main/module-14.ts\n+++ b/src/main/module-14.ts\n@@ -1,2 +1,3 @@\n-export const old_14 = true;\n+export const old_14 = false;\n+export const next_14 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 32545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "000000000000000000000000000000000000000e"
+      }
+    },
+    {
+      "offsetMs": 32590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000e",
+        "suite": "main-regression",
+        "ok": true,
+        "durationMs": 1150,
+        "output": "tests for commit 14"
+      }
+    },
+    {
+      "offsetMs": 34000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "000000000000000000000000000000000000000f",
+        "parents": [
+          "0000000000000000000000000000000000000009"
+        ],
+        "branch": "feature/tests",
+        "agentId": "agent-worker-tests",
+        "taskId": "task-tests",
+        "message": "test: expand integration coverage",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-tests/module-15.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-tests/module-15.ts\n+++ b/src/feature-tests/module-15.ts\n@@ -1,2 +1,3 @@\n-export const old_15 = true;\n+export const old_15 = false;\n+export const next_15 = \"feature/tests\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-tests/module-15.ts b/src/feature-tests/module-15.ts\n--- a/src/feature-tests/module-15.ts\n+++ b/src/feature-tests/module-15.ts\n@@ -1,2 +1,3 @@\n-export const old_15 = true;\n+export const old_15 = false;\n+export const next_15 = \"feature/tests\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 34045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/tests",
+        "sha": "000000000000000000000000000000000000000f"
+      }
+    },
+    {
+      "offsetMs": 35500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000010",
+        "parents": [
+          "000000000000000000000000000000000000000e"
+        ],
+        "branch": "main",
+        "agentId": "agent-worker-api",
+        "taskId": "task-api",
+        "message": "fix: websocket reconnect behavior",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-16.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-16.ts\n+++ b/src/main/module-16.ts\n@@ -1,2 +1,3 @@\n-export const old_16 = true;\n+export const old_16 = false;\n+export const next_16 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-16.ts b/src/main/module-16.ts\n--- a/src/main/module-16.ts\n+++ b/src/main/module-16.ts\n@@ -1,2 +1,3 @@\n-export const old_16 = true;\n+export const old_16 = false;\n+export const next_16 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 35545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000010"
+      }
+    },
+    {
+      "offsetMs": 35590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000010",
+        "suite": "main-regression",
+        "ok": true,
+        "durationMs": 1200,
+        "output": "tests for commit 16"
+      }
+    },
+    {
+      "offsetMs": 37000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000011",
+        "parents": [
+          "0000000000000000000000000000000000000007"
+        ],
+        "branch": "feature/api",
+        "agentId": "agent-worker-api",
+        "taskId": "task-api",
+        "message": "feat: log import endpoint",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/feature-api/module-17.ts",
+              "status": "modified",
+              "patch": "--- a/src/feature-api/module-17.ts\n+++ b/src/feature-api/module-17.ts\n@@ -1,2 +1,3 @@\n-export const old_17 = true;\n+export const old_17 = false;\n+export const next_17 = \"feature/api\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/feature-api/module-17.ts b/src/feature-api/module-17.ts\n--- a/src/feature-api/module-17.ts\n+++ b/src/feature-api/module-17.ts\n@@ -1,2 +1,3 @@\n-export const old_17 = true;\n+export const old_17 = false;\n+export const next_17 = \"feature/api\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 37045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "feature/api",
+        "sha": "0000000000000000000000000000000000000011"
+      }
+    },
+    {
+      "offsetMs": 38500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000012",
+        "parents": [
+          "0000000000000000000000000000000000000010",
+          "000000000000000000000000000000000000000d"
+        ],
+        "branch": "main",
+        "agentId": "agent-plan-b",
+        "taskId": "task-ui",
+        "message": "merge: ui selection sync to main",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-18.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-18.ts\n+++ b/src/main/module-18.ts\n@@ -1,2 +1,3 @@\n-export const old_18 = true;\n+export const old_18 = false;\n+export const next_18 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-18.ts b/src/main/module-18.ts\n--- a/src/main/module-18.ts\n+++ b/src/main/module-18.ts\n@@ -1,2 +1,3 @@\n-export const old_18 = true;\n+export const old_18 = false;\n+export const next_18 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 38545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000012"
+      }
+    },
+    {
+      "offsetMs": 38590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000012",
+        "suite": "main-regression",
+        "ok": true,
+        "durationMs": 1250,
+        "output": "tests for commit 18"
+      }
+    },
+    {
+      "offsetMs": 40000,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000013",
+        "parents": [
+          "0000000000000000000000000000000000000012",
+          "000000000000000000000000000000000000000f"
+        ],
+        "branch": "main",
+        "agentId": "agent-plan-a",
+        "taskId": "task-tests",
+        "message": "merge: tests coverage updates",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-19.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-19.ts\n+++ b/src/main/module-19.ts\n@@ -1,2 +1,3 @@\n-export const old_19 = true;\n+export const old_19 = false;\n+export const next_19 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-19.ts b/src/main/module-19.ts\n--- a/src/main/module-19.ts\n+++ b/src/main/module-19.ts\n@@ -1,2 +1,3 @@\n-export const old_19 = true;\n+export const old_19 = false;\n+export const next_19 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 40045,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000013"
+      }
+    },
+    {
+      "offsetMs": 41500,
+      "type": "git.commit_created",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000014",
+        "parents": [
+          "0000000000000000000000000000000000000013",
+          "0000000000000000000000000000000000000011"
+        ],
+        "branch": "main",
+        "agentId": "agent-root",
+        "taskId": "task-docs",
+        "message": "merge: finalize uploaded log run",
+        "stats": {
+          "filesChanged": 1,
+          "insertions": 2,
+          "deletions": 1
+        },
+        "diff": {
+          "files": [
+            {
+              "path": "src/main/module-20.ts",
+              "status": "modified",
+              "patch": "--- a/src/main/module-20.ts\n+++ b/src/main/module-20.ts\n@@ -1,2 +1,3 @@\n-export const old_20 = true;\n+export const old_20 = false;\n+export const next_20 = \"main\";\n"
+            }
+          ],
+          "unified": "diff --git a/src/main/module-20.ts b/src/main/module-20.ts\n--- a/src/main/module-20.ts\n+++ b/src/main/module-20.ts\n@@ -1,2 +1,3 @@\n-export const old_20 = true;\n+export const old_20 = false;\n+export const next_20 = \"main\";\n"
+        }
+      }
+    },
+    {
+      "offsetMs": 41545,
+      "type": "git.branch_updated",
+      "payload": {
+        "branch": "main",
+        "sha": "0000000000000000000000000000000000000014"
+      }
+    },
+    {
+      "offsetMs": 41590,
+      "type": "tests.result",
+      "payload": {
+        "sha": "0000000000000000000000000000000000000014",
+        "suite": "main-regression",
+        "ok": false,
+        "durationMs": 1300,
+        "output": "tests for commit 20"
+      }
+    },
+    {
+      "offsetMs": 47000,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-ui",
+        "status": "done"
+      }
+    },
+    {
+      "offsetMs": 47600,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-api",
+        "status": "done"
+      }
+    },
+    {
+      "offsetMs": 48200,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-tests",
+        "status": "done"
+      }
+    },
+    {
+      "offsetMs": 48800,
+      "type": "task.status_changed",
+      "payload": {
+        "taskId": "task-docs",
+        "status": "done"
+      }
+    },
+    {
+      "offsetMs": 50500,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-worker-ui",
+        "state": "done"
+      }
+    },
+    {
+      "offsetMs": 51000,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-worker-api",
+        "state": "done"
+      }
+    },
+    {
+      "offsetMs": 51500,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-worker-tests",
+        "state": "done"
+      }
+    },
+    {
+      "offsetMs": 52000,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-worker-docs",
+        "state": "done"
+      }
+    },
+    {
+      "offsetMs": 53000,
+      "type": "agent.state_changed",
+      "payload": {
+        "agentId": "agent-root",
+        "state": "done",
+        "note": "Uploaded log playback ready"
+      }
+    }
+  ]
+}

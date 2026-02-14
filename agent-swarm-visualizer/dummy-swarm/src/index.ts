@@ -10,7 +10,9 @@ import type {
   DiffFile,
   EventPayloadMap,
   EventType,
-  GitCommitCreatedPayload
+  GitCommitCreatedPayload,
+  ImportLogResponse,
+  RunLogSpec
 } from "@agent-swarm-visualizer/shared";
 
 const BASE_TIMELINE_MS = 60_000;
@@ -400,6 +402,26 @@ function getCliArgv(): string[] {
   return argv.slice(separatorIndex + 1);
 }
 
+function resolveLogPath(rawPath: string): string {
+  if (path.isAbsolute(rawPath)) {
+    return rawPath;
+  }
+  const normalized = rawPath.replace(/^dummy-swarm[\\/]/, "");
+  const candidates = [
+    path.resolve(process.cwd(), rawPath),
+    path.resolve(process.cwd(), normalized),
+    path.resolve(process.cwd(), "dummy-swarm", normalized)
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 async function appendEvent(runId: string, event: AnyEventEnvelope): Promise<void> {
   await postJson<{ ok: true; inserted: number }>("/v1/events", {
     runId,
@@ -494,7 +516,7 @@ async function emitEvent(runId: string, event: AnyEventEnvelope): Promise<string
 
 async function main() {
   const args = minimist(getCliArgv(), {
-    string: ["run-name", "base-time"],
+    string: ["run-name", "base-time", "log-file"],
     default: {
       seed: 1,
       speed: 1,
@@ -507,6 +529,7 @@ async function main() {
   const speed = Math.max(0.1, Number(args.speed ?? 1));
   const durationSeconds = Math.max(10, Number(args.duration ?? 60));
   const durationMs = durationSeconds * 1000;
+  const hasBaseTimeArg = args["base-time"] !== undefined;
   const baseTime = parseBaseTime(args["base-time"]);
 
   const rng = seedrandom(String(seed));
@@ -514,6 +537,23 @@ async function main() {
   console.log(`[dummy-swarm] backend candidates=${BACKEND_CANDIDATES.join(", ")}`);
   await waitForBackend();
   console.log(`[dummy-swarm] backend selected=${ACTIVE_BACKEND_URL}`);
+
+  const logFileArg = args["log-file"];
+  if (typeof logFileArg === "string" && logFileArg.length > 0) {
+    const resolvedLogPath = resolveLogPath(logFileArg);
+    const rawLog = fs.readFileSync(resolvedLogPath, "utf8");
+    const parsedLog = JSON.parse(rawLog) as RunLogSpec;
+    const importResponse = await postJson<ImportLogResponse>("/v1/logs/import", {
+      name: runName,
+      baseTime: hasBaseTimeArg ? baseTime : undefined,
+      log: parsedLog
+    });
+
+    console.log(
+      `[dummy-swarm] imported log=${resolvedLogPath} runId=${importResponse.runId} inserted=${importResponse.inserted} createdRun=${importResponse.createdRun}`
+    );
+    return;
+  }
 
   const runResponse = await postJson<{ runId: string }>("/v1/runs", { name: runName });
   const runId = runResponse.runId;

@@ -11,6 +11,7 @@ import {
   createRunRequestSchema,
   eventEnvelopeSchema,
   handoffRequestSchema,
+  importLogRequestSchema,
   subscribeMessageSchema,
   taskAssignRequestSchema,
   taskCreateRequestSchema,
@@ -143,6 +144,30 @@ fastify.post("/v1/events", async (request, reply) => {
   const inserted = store.appendEvents(body.runId, parsedEvents);
   broadcast(body.runId, parsedEvents);
   return reply.send({ ok: true as const, inserted });
+});
+
+fastify.post("/v1/logs/import", async (request, reply) => {
+  const body = parseBody(importLogRequestSchema, request.body);
+  const runId = body.runId ?? store.createRun(body.name ?? body.log.name ?? "Imported Log");
+  const createdRun = body.runId === undefined;
+  if (!createdRun) {
+    ensureRunExists(runId);
+  }
+
+  const baseTime = body.baseTime ?? body.log.baseTime ?? Date.now();
+  const events: AnyEventEnvelope[] = body.log.events
+    .map((record) => ({
+      eventId: record.eventId ?? randomUUID(),
+      runId,
+      ts: baseTime + record.offsetMs,
+      type: record.type,
+      payload: record.payload
+    }))
+    .sort((a, b) => (a.ts === b.ts ? a.eventId.localeCompare(b.eventId) : a.ts - b.ts));
+
+  const inserted = store.appendEvents(runId, events);
+  broadcast(runId, events);
+  return reply.send({ ok: true as const, runId, inserted, createdRun });
 });
 
 fastify.get("/v1/events", async (request, reply) => {

@@ -39,7 +39,7 @@ This document defines the API that populates the dashboard.
 ## Data Flow (How Dashboard Gets Populated)
 
 1. Create or select a run (`POST /v1/runs`, `GET /v1/runs`)
-2. Append events (either generic `/v1/events` or convenience endpoints)
+2. Append events (generic `/v1/events`, log import `/v1/logs/import`, or convenience endpoints)
 3. Dashboard consumes:
    - live events via `WS /v1/stream?runId=...`
    - replay events via `GET /v1/events`
@@ -148,6 +148,46 @@ Response:
 ```json
 { "events": [/* EventEnvelope[] */] }
 ```
+
+---
+
+### 2b) Log Import
+
+#### `POST /v1/logs/import`
+Import a `RunLogSpec` file payload and append translated events.
+
+Request:
+
+```json
+{
+  "name": "Uploaded Log Demo",
+  "baseTime": 1760000000000,
+  "log": {
+    "schemaVersion": "1.0",
+    "events": [
+      {
+        "offsetMs": 0,
+        "type": "agent.spawned",
+        "payload": { "agentId": "agent-root", "role": "root_planner" }
+      }
+    ]
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "runId": "...",
+  "inserted": 1,
+  "createdRun": true
+}
+```
+
+Full log spec contract:
+- `docs/LOG_API_CONTRACT.md`
 
 ---
 
@@ -455,6 +495,36 @@ Client message:
       "query": { "runId": "string", "until": "number?" },
       "summary": "Query event log for replay",
       "response": { "events": ["EventEnvelope"] }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/logs/import",
+      "summary": "Import RunLogSpec and append translated events",
+      "request": {
+        "runId": "string?",
+        "name": "string?",
+        "baseTime": "number?",
+        "log": {
+          "schemaVersion": "1.0",
+          "name": "string?",
+          "description": "string?",
+          "baseTime": "number?",
+          "events": [
+            {
+              "eventId": "string?",
+              "offsetMs": "number>=0",
+              "type": "EventType",
+              "payload": "EventPayload(type)"
+            }
+          ]
+        }
+      },
+      "response": {
+        "ok": true,
+        "runId": "string",
+        "inserted": "number",
+        "createdRun": "boolean"
+      }
     },
     {
       "method": "GET",
