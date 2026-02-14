@@ -11,6 +11,7 @@ Stop:    modal app stop agentswarm-test-llm
 """
 
 import modal
+import os
 import subprocess
 import sys
 import time
@@ -30,10 +31,13 @@ MODEL = "Qwen/Qwen2.5-Coder-3B-Instruct"  # ~6GB VRAM in float16, fits T4 easily
     image=image,
     gpu="T4",
     timeout=1800,
-    allow_concurrent_inputs=4,
 )
+@modal.concurrent(max_inputs=4)
 @modal.web_server(8000, startup_timeout=300)
 def serve():
+    # Force UTF-8 to avoid charmap encoding errors in container logs
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
     cmd = [
         "python", "-m", "vllm.entrypoints.openai.api_server",
         "--model", MODEL,
@@ -50,6 +54,7 @@ def serve():
         cmd,
         stdout=sys.stdout,
         stderr=sys.stderr,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
     # Wait for vLLM to be ready before accepting traffic

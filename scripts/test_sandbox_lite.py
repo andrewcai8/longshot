@@ -1,24 +1,3 @@
-"""
-Lightweight Sandbox + LLM Test
-===============================
-
-Tests the full agent pipeline inside a Modal sandbox WITHOUT needing
-the compiled sandbox package. Runs the agent logic inline as a Node.js
-script inside the base sandbox image.
-
-This proves:
-  1. Modal sandbox boots and tools work
-  2. Sandbox can reach your LLM endpoint
-  3. LLM responds with tool calls
-  4. Tools execute inside the sandbox (write_file, read_file, git_commit)
-  5. The full loop produces a handoff
-
-Usage:
-    python scripts/test_sandbox_lite.py --endpoint https://your-endpoint.modal.run
-
-Cost: ~$0.05 (CPU sandbox only, no GPU)
-"""
-
 import argparse
 import asyncio
 import json
