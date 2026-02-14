@@ -391,6 +391,91 @@ async function appendEvent(runId: string, event: AnyEventEnvelope): Promise<void
   });
 }
 
+async function emitEvent(runId: string, event: AnyEventEnvelope): Promise<string> {
+  switch (event.type) {
+    case "agent.spawned":
+      await postJson<{ ok: true }>("/v1/agents/create", {
+        runId,
+        agent: event.payload
+      });
+      return "/v1/agents/create";
+    case "task.created":
+      await postJson<{ ok: true }>("/v1/tasks/create", {
+        runId,
+        task: event.payload
+      });
+      return "/v1/tasks/create";
+    case "task.assigned":
+      await postJson<{ ok: true }>("/v1/tasks/assign", {
+        runId,
+        taskId: event.payload.taskId,
+        agentId: event.payload.agentId
+      });
+      return "/v1/tasks/assign";
+    case "task.status_changed":
+      await postJson<{ ok: true }>("/v1/tasks/status", {
+        runId,
+        taskId: event.payload.taskId,
+        status: event.payload.status,
+        note: event.payload.note
+      });
+      return "/v1/tasks/status";
+    case "agent.state_changed":
+      await postJson<{ ok: true }>("/v1/agents/state", {
+        runId,
+        agentId: event.payload.agentId,
+        state: event.payload.state,
+        note: event.payload.note
+      });
+      return "/v1/agents/state";
+    case "handoff.submitted":
+      await postJson<{ ok: true }>("/v1/handoffs/submit", {
+        runId,
+        handoff: event.payload
+      });
+      return "/v1/handoffs/submit";
+    case "git.commit_created": {
+      if (!event.payload.diff) {
+        throw new Error(`git.commit_created payload for ${event.payload.sha} is missing diff`);
+      }
+      const { diff, ...commit } = event.payload;
+      await postJson<{ ok: true }>("/v1/git/commit", {
+        runId,
+        commit: {
+          ...commit,
+          createdAt: commit.createdAt ?? event.ts
+        },
+        diff
+      });
+      return "/v1/git/commit";
+    }
+    case "git.branch_updated":
+      await postJson<{ ok: true }>("/v1/git/branch", {
+        runId,
+        branch: event.payload.branch,
+        sha: event.payload.sha
+      });
+      return "/v1/git/branch";
+    case "tests.result":
+      await postJson<{ ok: true }>("/v1/tests/result", {
+        runId,
+        sha: event.payload.sha,
+        suite: event.payload.suite,
+        ok: event.payload.ok,
+        durationMs: event.payload.durationMs,
+        output: event.payload.output
+      });
+      return "/v1/tests/result";
+    case "tool.called":
+    case "tool.finished":
+      await appendEvent(runId, event);
+      return "/v1/events";
+    default:
+      await appendEvent(runId, event);
+      return "/v1/events";
+  }
+}
+
 async function main() {
   const args = minimist(getCliArgv(), {
     string: ["run-name", "base-time"],
@@ -436,7 +521,7 @@ async function main() {
   const sha4 = deterministicSha(rng);
   const sha5 = deterministicSha(rng);
 
-  const diffMap = buildDiffs();
+  const diffMap = makeDiffs();
 
   type Scheduled = {
     offset: number;
@@ -593,8 +678,8 @@ async function main() {
       await sleep(waitMs);
     }
 
-    await appendEvent(runId, event);
-    console.log(`[dummy-swarm] ${new Date(event.ts).toISOString()} ${event.type}`);
+    const endpoint = await emitEvent(runId, event);
+    console.log(`[dummy-swarm] ${new Date(event.ts).toISOString()} ${event.type} -> ${endpoint}`);
   }
 
   console.log("[dummy-swarm] completed");

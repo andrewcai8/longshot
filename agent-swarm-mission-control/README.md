@@ -16,7 +16,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
 
 ## Prerequisites
 
-- Node.js 20 or 22 LTS (Node 24 is not supported by current `better-sqlite3` setup)
+- Node.js 22+ (tested with Node 22 and 24)
 - pnpm 10+
 
 ## Setup
@@ -43,6 +43,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
   - `pnpm dev:dashboard`
 - Dummy swarm only:
   - `pnpm --filter dummy-swarm dev -- --run-name "Demo Run" --seed 1 --speed 20 --duration 90`
+  - The dummy swarm exercises convenience APIs (`/v1/agents/*`, `/v1/tasks/*`, `/v1/git/*`, `/v1/tests/result`) and uses `/v1/events` for tool-call events.
 
 ## URLs
 
