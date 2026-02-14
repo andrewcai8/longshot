@@ -1,6 +1,6 @@
 # Bootstrap Guide For New Generated Repos
 
-Use this guide to create a new project folder under `generated-repos/<project-name>` from the `generated-repos/example` template.
+Use this guide to create a new project folder under `generated-repos/<project-name>` from the local `generated-repos/example` template folder.
 
 This is the orchestration doc for "plan mode style" project bootstrapping:
 - collect high-level intent,
