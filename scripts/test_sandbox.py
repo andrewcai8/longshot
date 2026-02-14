@@ -187,7 +187,7 @@ async def test_agent_server():
         image=image,
         timeout=300,
         encrypted_ports=[port],
-        environment_variables={
+        env={
             "PORT": str(port),
             "SANDBOX_ID": "test-sandbox-001",
         },
@@ -303,7 +303,7 @@ async def test_full_agent(glm5_endpoint: str):
         image=image,
         timeout=600,
         encrypted_ports=[port],
-        environment_variables={
+        env={
             "PORT": str(port),
             "SANDBOX_ID": "test-full-001",
         },

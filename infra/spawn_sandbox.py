@@ -89,7 +89,7 @@ class SandboxManager:
             timeout=self.timeout,
             idle_timeout=self.idle_timeout,
             encrypted_ports=[self.agent_port],
-            environment_variables={
+            env={
                 "PORT": str(self.agent_port),
                 "SANDBOX_ID": sandbox_id,
                 "NODE_ENV": "production",
