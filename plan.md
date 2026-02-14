@@ -81,12 +81,12 @@ The hackathon deliverable is both **the harness itself** and **whatever it build
 
 ### GLM-5 Deployment Status
 
-Both providers now have GLM-5 deployed and validated:
+Both providers deploying GLM-5 simultaneously (2026-02-14):
 
 | Provider | GPU | $/hr (8x) | Image | Status |
 |----------|-----|-----------|-------|--------|
-| Modal | 8x B200 | ~$50/hr | `lmsysorg/sglang:glm5-blackwell` | ✅ Deployed — dummy weight test passed, real weight deploy in progress |
-| RunPod | 8x H200 SXM | ~$28.72/hr | Serverless endpoint | ✅ Deployed — endpoint `8u0fdj5jh2rlxd` |
+| Modal | 8x B200 | ~$50/hr | `lmsysorg/sglang:glm5-blackwell` | 🔄 Deploying — dummy weight test passed, real weight deploy in progress |
+| RunPod | 8x H200 SXM | ~$28.72/hr | Serverless endpoint | 🔄 Deploying — endpoint `8u0fdj5jh2rlxd` |
 
 ### Hackathon Budget Math (29-hour hackathon)
 
@@ -172,6 +172,17 @@ agentswarm/
 
 ## Current Status
 
+### Phase 0: LLM Backend — 🔄 DEPLOYING (2026-02-14)
+
+GLM-5 is being deployed on **both** Modal and RunPod simultaneously. Neither endpoint is live yet.
+
+| Provider | GPU | Status | Endpoint |
+|----------|-----|--------|----------|
+| Modal | 8x B200 | 🔄 Deploying | `https://<workspace>--glm5-inference-glm5.modal.direct` (not live yet) |
+| RunPod | 8x H200 SXM | 🔄 Deploying | `https://api.runpod.ai/v2/8u0fdj5jh2rlxd/openai` (not live yet) |
+
+**⏳ BLOCKED: Steps 1c, 1d, and everything beyond require a live LLM endpoint. Nothing can progress until at least one provider is up.**
+
 ### Phase 1: Foundation — ✅ CODE COMPLETE (not yet validated on live infra)
 
 Everything is built. Nothing has been confirmed working against live Modal.
@@ -193,7 +204,7 @@ Everything is built. Nothing has been confirmed working against live Modal.
 
 | Component | Status | Lines | Details |
 |-----------|--------|-------|---------|
-| `config.ts` | ✅ DONE | 77 | Loads from env vars. Required: RUNPOD_ENDPOINT_ID, RUNPOD_API_KEY, GIT_REPO_URL. Constructs RunPod endpoint URL. |
+| `config.ts` | ✅ DONE | 75 | Loads from env vars. Required: `LLM_BASE_URL`, `GIT_REPO_URL`. Optional: `LLM_API_KEY`. Normalizes URL (strips trailing `/v1`). |
 | `task-queue.ts` | ✅ DONE | 374 | PriorityQueue (min-heap) + TaskQueue (state machine with valid transitions). |
 | `worker-pool.ts` | ✅ DONE | 163 | Ephemeral model. `assignTask()` spawns Python subprocess → spawn_sandbox.py → reads JSON handoff from stdout last line. |
 | `merge-queue.ts` | ✅ DONE | 173 | 3 merge strategies. Conflict detection (skip+log, no auto-resolve). |
@@ -213,7 +224,7 @@ Everything is built. Nothing has been confirmed working against live Modal.
 #### Phase 2 Key Design Decisions
 - **Ephemeral sandboxes**: No persistent worker pool. Each task gets a fresh sandbox → task.json → exec → result.json → terminate.
 - **Python subprocess for sandbox lifecycle**: worker-pool.ts calls `spawn_sandbox.py` via `child_process.execFile`. Hot path (LLM calls) is pure TS.
-- **RunPod serverless as primary LLM**: config.ts constructs `https://api.runpod.ai/v2/{RUNPOD_ENDPOINT_ID}/openai`. No self-hosted GLM-5 needed for testing.
+- **Provider-agnostic LLM config**: config.ts uses `LLM_BASE_URL` (any OpenAI-compatible endpoint — RunPod, Modal, or local). No provider-specific logic.
 - **Conflict detection only**: Merge conflicts are skipped + logged. No auto-resolution (defer to future).
 - **ConcurrencyLimiter**: Dispatch lock prevents spawning more than `maxWorkers` sandboxes simultaneously.
 
@@ -245,11 +256,38 @@ Live web UI for monitoring the agent swarm during the demo run.
 | Target repo spec | ~2,539 | 3 files (SPEC.md + FEATURES.json + AGENTS.md) |
 | **Total** | **~8,303** | **38 files** |
 
-Tests: 78 unit tests across 5 test files. All passing.
+Tests: 85 unit tests across 5 test files. All passing (237ms total).
 
 ---
 
 ## What Needs To Happen (Priority Order)
+
+### Step 0: Prerequisites (unblock everything else)
+
+These are required before ANY E2E validation can happen:
+
+#### 0a. GLM-5 endpoint goes live — ⏳ DEPLOYING (2026-02-14)
+GLM-5 is deploying on both Modal (8x B200) and RunPod (8x H200 SXM). **Nothing requiring LLM calls can run until at least one endpoint responds.**
+
+Once live, set in `.env`:
+```env
+# For Modal:
+LLM_BASE_URL=https://<workspace>--glm5-inference-glm5.modal.direct
+LLM_API_KEY=
+
+# OR for RunPod:
+LLM_BASE_URL=https://api.runpod.ai/v2/8u0fdj5jh2rlxd/openai
+LLM_API_KEY=<runpod-api-key>
+```
+
+#### 0b. Push target-repo to GitHub — ❌ NOT DONE
+`GIT_REPO_URL=` is empty in `.env`. Sandboxes need a GitHub repo to clone/push. Must:
+1. Create a GitHub repo (e.g., `agentswarm-voxelcraft`)
+2. Push `target-repo/` contents to it
+3. Set `GIT_REPO_URL=https://github.com/<org>/agentswarm-voxelcraft.git` in `.env`
+4. Ensure sandboxes can clone it (public, or with token in URL)
+
+---
 
 ### Step 1: Validate the Pipeline E2E (CRITICAL — do this first)
 
@@ -257,7 +295,7 @@ Tests: 78 unit tests across 5 test files. All passing.
 
 The entire system has been built in isolation. Every component was coded without being run against live infrastructure. This is the highest-risk moment — if any integration point is broken, we need to find out now.
 
-#### 1a. Validate sandbox image builds on Modal — ✅ PASSED (2025-02-14)
+#### 1a. Validate sandbox image builds on Modal — ✅ PASSED (2026-02-14)
 ```bash
 cd infra && modal run sandbox_image.py
 ```
@@ -265,35 +303,38 @@ Confirms: Node 22, Git, ripgrep, pnpm, Pi SDK all install correctly in the Modal
 
 **Result:** All 8 tools verified: node v22.22.0, npm 10.9.4, pnpm 9.15.9, git 2.39.5, rg 14.1.1, jq 1.6, python3 3.12.10, curl 7.88.1. Image builds in ~50s total across 6 layers.
 
-#### 1b. Validate a single sandbox lifecycle — ✅ PASSED (2025-02-14)
+#### 1b. Validate a single sandbox lifecycle — ✅ PASSED (2026-02-14)
 Run `spawn_sandbox.py` directly with a trivial task payload (no LLM needed — just file I/O):
 - Create sandbox → write task.json → clone a repo → exec a simple Node script → read result.json → terminate
 - This validates: Modal sandbox API, file I/O, git clone, Node.js execution, cleanup
 
 **Result:** `python scripts/test_sandbox.py basic` — sandbox created (sb-2hHCBQZVzZX2rpxZgx6c7W), command exec, file I/O, git init+commit, Node.js v22.22.0 all passed.
 
-#### 1c. Validate the Pi coding agent inside a sandbox
-Run `worker-runner.ts` inside a sandbox with a real LLM call to the RunPod endpoint:
+#### 1c. Validate the Pi coding agent inside a sandbox — ❌ BLOCKED (needs 0a + 0b)
+Run `worker-runner.ts` inside a sandbox with a real LLM call:
 - Task: "Create a file `src/utils/constants.ts` that exports `CHUNK_SIZE = 16`"
 - This validates: Pi SDK registration, GLM-5 provider config, LLM round-trip, tool execution, git commit, handoff generation
 
-#### 1d. Validate the orchestrator main.ts with 1 worker
+**Highest-risk integration points (likely to break here):**
+1. **Pi SDK API compatibility** — `worker-runner.ts` uses `api: "openai-completions"`, `registerProvider()`, `createAgentSession()` from `@mariozechner/pi-coding-agent@0.52.0`. These have never been validated against the actual package.
+2. **Node module resolution inside sandbox** — The symlink chain (`/agent/worker-runner.js` → `/agent/node_modules/@agentswarm/core`, global Pi SDK) is untested at runtime.
+
+#### 1d. Validate the orchestrator main.ts with 1 worker — ❌ BLOCKED (needs 1c)
 ```bash
-GIT_REPO_URL=<repo> MAX_WORKERS=1 node packages/orchestrator/dist/main.js
+LLM_BASE_URL=<endpoint> GIT_REPO_URL=<repo> MAX_WORKERS=1 node packages/orchestrator/dist/main.js
 ```
-- Does the planner call RunPod and get back valid Task JSON?
+- Does the planner call the LLM and get back valid Task JSON?
 - Does it spawn one sandbox and get a handoff?
 - Does the merge queue merge the branch?
 - Does the next planner iteration see the new commits?
 
 **Expected issues to surface:**
-- Modal SDK API changes (sandbox creation, file I/O, exec)
 - Pi SDK integration bugs (provider registration, agent session, tool calling format)
-- RunPod endpoint compatibility (request format, response parsing, auth headers)
+- LLM endpoint compatibility (request format, response parsing, auth headers)
 - spawn_sandbox.py stdout parsing (last-line JSON extraction)
 - Git operations (clone with auth, branch creation, merge conflicts on first merge)
 
-**Budget for this step:** ~$5-10 Modal (sandbox creation), ~$1-2 RunPod (a few LLM calls). Negligible.
+**Budget for this step:** ~$5-10 Modal (sandbox creation), ~$1-2 LLM calls. Negligible.
 
 ---
 
@@ -375,13 +416,16 @@ The hackathon demo. Requirements:
 
 | Issue | Severity | Details |
 |-------|----------|---------|
-| E2E never validated | CRITICAL | The entire pipeline has never run against live Modal/RunPod. |
-| GIT_REPO_URL not set | CRITICAL | .env has `GIT_REPO_URL=` (empty). Need a GitHub repo for sandboxes to clone/push. |
+| GLM-5 not live yet | **CRITICAL** | Both Modal and RunPod deployments are in progress. Nothing requiring LLM calls can proceed. |
+| E2E never validated | **CRITICAL** | The entire pipeline has never run against live Modal/RunPod. |
+| GIT_REPO_URL not set | **CRITICAL** | `.env` has `GIT_REPO_URL=` (empty). Need a GitHub repo for sandboxes to clone/push. |
+| LLM_BASE_URL not set | **CRITICAL** | `.env` has `LLM_BASE_URL=` (empty). Must be set to whichever GLM-5 endpoint comes up first. |
+| Pi SDK compatibility unknown | **HIGH** | worker-runner.ts uses `api: "openai-completions"`, `registerProvider()`, `createAgentSession()` from `@mariozechner/pi-coding-agent@0.52.0` — never tested against the actual package. This is the #1 risk for step 1c. |
+| Node module resolution in sandbox | **HIGH** | Symlink chain (`/agent/worker-runner.js` → `/agent/node_modules/`) untested at runtime. If Pi SDK's internal imports expect a different layout, it will fail. |
 | Unbounded subtask fan-out | MEDIUM | Subplanner launches all subtasks concurrently. At depth-3 recursion could fan to ~1000 LLM calls. ConcurrencyLimiter helps but doesn't cap recursion breadth. |
-| `shouldDecompose` heuristic is simplistic | MINOR | Scope size is a poor proxy for complexity. Good enough for now. |
 | No auto-merge conflict resolution | MEDIUM | Merge conflicts are skipped + logged. At 100 workers, conflict rate could be high. |
-| Pi SDK compatibility unknown | MEDIUM | worker-runner.ts imports from `@mariozechner/pi-coding-agent` — never tested against the actual package. API surface may have changed. |
-| sandbox_image.py installs Pi SDK v0.52.0 | MINOR | Pinned version. May need update if API changed. |
+| `shouldDecompose` heuristic is simplistic | MINOR | Scope size is a poor proxy for complexity. Good enough for now. |
+| `deploy_glm5.py` uncommitted change | MINOR | HuggingFace secret addition (+3 lines) is uncommitted. |
 | No dashboard | LOW | Nice-to-have for demo. System works without it. |
 | No freshness mechanisms | LOW | No scratchpad or auto-summarization for long agent sessions. Workers are ephemeral (one task each), so less critical. |
 
@@ -390,9 +434,10 @@ The hackathon demo. Requirements:
 ## Environment Variables (Required for main.ts)
 
 ```env
-# LLM Backend (RunPod serverless)
-RUNPOD_ENDPOINT_ID=8u0fdj5jh2rlxd
-RUNPOD_API_KEY=<your-key>
+# LLM Backend (any OpenAI-compatible endpoint)
+LLM_BASE_URL=https://api.runpod.ai/v2/8u0fdj5jh2rlxd/openai   # RunPod
+# LLM_BASE_URL=https://<workspace>--glm5-inference-glm5.modal.direct  # Modal
+LLM_API_KEY=<your-api-key>   # Required for RunPod, optional for Modal
 LLM_MODEL=glm-5
 
 # Git (MUST be set before running)
@@ -407,6 +452,8 @@ PYTHON_PATH=python3
 LLM_MAX_TOKENS=8192
 LLM_TEMPERATURE=0.7
 ```
+
+**Note:** `config.ts` normalizes `LLM_BASE_URL` by stripping trailing `/` and `/v1` suffix. `llm-client.ts` appends `/v1/chat/completions`. So both `https://...endpoint/openai` and `https://...endpoint/openai/v1` work.
 
 ## GLM-5 on Modal (Self-Hosted)
 

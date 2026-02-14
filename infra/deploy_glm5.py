@@ -87,6 +87,8 @@ image = image.env(
 )
 
 
+hf_secret = modal.Secret.from_name("huggingface")
+
 if not USE_DUMMY_WEIGHTS:
     def _download_model(repo_id, revision=None):
         from huggingface_hub import snapshot_download
@@ -95,6 +97,7 @@ if not USE_DUMMY_WEIGHTS:
     image = image.run_function(
         _download_model,
         volumes={hf_cache_path: hf_cache_vol},
+        secrets=[hf_secret],
         args=(REPO_ID,),
     )
 
