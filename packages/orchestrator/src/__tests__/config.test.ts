@@ -25,6 +25,7 @@ function withEnv(env: Record<string, string>, fn: () => void): void {
 // Required env vars for valid config
 const REQUIRED_ENV = {
   RUNPOD_ENDPOINT_ID: "test-endpoint-id",
+  RUNPOD_API_KEY: "test-api-key",
   GIT_REPO_URL: "https://github.com/test/repo",
 };
 
@@ -53,7 +54,6 @@ describe("config", () => {
       assert.strictEqual(config.targetRepoPath, "./target-repo");
       assert.strictEqual(config.pythonPath, "python3");
       assert.strictEqual(config.healthCheckInterval, 10);
-      assert.strictEqual(config.stuckWorkerThreshold, 300);
     });
   });
 
@@ -75,7 +75,6 @@ describe("config", () => {
       TARGET_REPO_PATH: "/custom/path",
       PYTHON_PATH: "/usr/bin/python",
       HEALTH_CHECK_INTERVAL: "30",
-      STUCK_WORKER_THRESHOLD: "600",
     };
 
     withEnv(customEnv, () => {
@@ -96,12 +95,11 @@ describe("config", () => {
       assert.strictEqual(config.targetRepoPath, "/custom/path");
       assert.strictEqual(config.pythonPath, "/usr/bin/python");
       assert.strictEqual(config.healthCheckInterval, 30);
-      assert.strictEqual(config.stuckWorkerThreshold, 600);
     });
   });
 
   it("throws on missing RUNPOD_ENDPOINT_ID", () => {
-    withEnv({ GIT_REPO_URL: REQUIRED_ENV.GIT_REPO_URL }, () => {
+    withEnv({ RUNPOD_API_KEY: REQUIRED_ENV.RUNPOD_API_KEY, GIT_REPO_URL: REQUIRED_ENV.GIT_REPO_URL }, () => {
       delete process.env.RUNPOD_ENDPOINT_ID;
       assert.throws(
         () => loadConfig(),
@@ -110,13 +108,31 @@ describe("config", () => {
     });
   });
 
+  it("throws on missing RUNPOD_API_KEY", () => {
+    withEnv({ RUNPOD_ENDPOINT_ID: REQUIRED_ENV.RUNPOD_ENDPOINT_ID, GIT_REPO_URL: REQUIRED_ENV.GIT_REPO_URL }, () => {
+      delete process.env.RUNPOD_API_KEY;
+      assert.throws(
+        () => loadConfig(),
+        (err: Error) => err.message === "Missing required env: RUNPOD_API_KEY"
+      );
+    });
+  });
+
   it("throws on missing GIT_REPO_URL", () => {
-    withEnv({ RUNPOD_ENDPOINT_ID: REQUIRED_ENV.RUNPOD_ENDPOINT_ID }, () => {
+    withEnv({ RUNPOD_ENDPOINT_ID: REQUIRED_ENV.RUNPOD_ENDPOINT_ID, RUNPOD_API_KEY: REQUIRED_ENV.RUNPOD_API_KEY }, () => {
       delete process.env.GIT_REPO_URL;
       assert.throws(
         () => loadConfig(),
         (err: Error) => err.message === "Missing required env: GIT_REPO_URL"
       );
+    });
+  });
+
+  it("constructs RunPod endpoint URL correctly", () => {
+    withEnv(REQUIRED_ENV, () => {
+      const config = loadConfig();
+      assert.strictEqual(config.llm.endpoint, "https://api.runpod.ai/v2/test-endpoint-id/openai");
+      assert.strictEqual(config.llm.apiKey, "test-api-key");
     });
   });
 

@@ -8,10 +8,9 @@ import type { TaskQueue } from "../task-queue.js";
 function createMockWorkerPool(workers: Worker[] = []): WorkerPool {
   return {
     getAllWorkers: () => workers,
-    getAvailableWorkers: () => workers.filter(w => w.sandboxStatus.status === "ready"),
+    getAvailableWorkers: () => [],
     getWorkerCount: () => workers.length,
-    getActiveTaskCount: () => workers.filter(w => w.sandboxStatus.status === "working").length,
-    checkWorkerHealth: async () => null,
+    getActiveTaskCount: () => workers.length,
   } as unknown as WorkerPool;
 }
 
@@ -25,23 +24,18 @@ function createMockTaskQueue(counts = { pending: 0, completed: 0, failed: 0, run
 }
 
 function makeWorker(overrides?: Partial<Worker>): Worker {
+  const now = Date.now();
   return {
-    id: "sandbox-1",
-    sandboxStatus: {
-      sandboxId: "sandbox-1",
-      status: "ready",
-      healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 }
-    },
-    createdAt: Date.now(),
-    lastHealthCheck: Date.now(),
+    id: "ephemeral-task-1",
+    currentTask: { id: "task-1", description: "test", scope: [], acceptance: "", branch: "worker/task-1", status: "running" as const, createdAt: now, priority: 5 },
+    startedAt: now,
     ...overrides,
-  } as Worker;
+  };
 }
 
 function createConfig(): MonitorConfig {
   return {
     healthCheckInterval: 60,
-    stuckWorkerThreshold: 30,
     workerTimeout: 300,
   };
 }
@@ -75,52 +69,10 @@ describe("Monitor", () => {
     });
   });
 
-  describe("isWorkerStuck", () => {
-    it("returns false for ready worker", () => {
-      config = createConfig();
-      const worker = makeWorker({ sandboxStatus: { sandboxId: "sandbox-1", status: "ready", healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 } } });
-      monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
-      assert.strictEqual(monitor.isWorkerStuck(worker), false);
-    });
-
-    it("returns false for recent working worker", () => {
-      config = createConfig();
-      const now = Date.now();
-      const worker = makeWorker({
-        sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: now, consecutiveFailures: 0 } },
-        lastHealthCheck: now
-      });
-      monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
-      assert.strictEqual(monitor.isWorkerStuck(worker), false);
-    });
-
-    it("returns true for stale working worker", () => {
-      config = createConfig();
-      const staleTime = Date.now() - (config.stuckWorkerThreshold * 1000) - 10000;
-      const worker = makeWorker({
-        sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: staleTime, consecutiveFailures: 0 } },
-        lastHealthCheck: staleTime
-      });
-      monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
-      assert.strictEqual(monitor.isWorkerStuck(worker), true);
-    });
-  });
-
   describe("isWorkerTimedOut", () => {
-    it("returns false for non-working worker", () => {
-      config = createConfig();
-      const worker = makeWorker({ sandboxStatus: { sandboxId: "sandbox-1", status: "ready", healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 } } });
-      monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
-      assert.strictEqual(monitor.isWorkerTimedOut(worker), false);
-    });
-
     it("returns false for recently started worker", () => {
       config = createConfig();
-      const now = Date.now();
-      const worker = makeWorker({
-        sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: now, consecutiveFailures: 0 } },
-        currentTask: { id: "task-1", startedAt: now, description: "test", scope: [], acceptance: "", branch: "", status: "running", createdAt: now, priority: 0 }
-      });
+      const worker = makeWorker({ startedAt: Date.now() });
       monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
       assert.strictEqual(monitor.isWorkerTimedOut(worker), false);
     });
@@ -128,29 +80,16 @@ describe("Monitor", () => {
     it("returns true for long-running worker", () => {
       config = createConfig();
       const startedAt = Date.now() - (config.workerTimeout * 1000) - 10000;
-      const worker = makeWorker({
-        sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 } },
-        currentTask: { id: "task-1", startedAt, description: "test", scope: [], acceptance: "", branch: "", status: "running", createdAt: startedAt - 1000, priority: 0 }
-      });
+      const worker = makeWorker({ startedAt });
       monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
       assert.strictEqual(monitor.isWorkerTimedOut(worker), true);
-    });
-
-    it("returns false when no startedAt", () => {
-      config = createConfig();
-      const worker = makeWorker({
-        sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 } },
-        currentTask: { id: "task-1", description: "test", scope: [], acceptance: "", branch: "", status: "running", createdAt: Date.now(), priority: 0 }
-      });
-      monitor = new Monitor(config, createMockWorkerPool([worker]), createMockTaskQueue());
-      assert.strictEqual(monitor.isWorkerTimedOut(worker), false);
     });
   });
 
   describe("getSnapshot", () => {
     it("returns correct metrics", () => {
       config = createConfig();
-      const worker = makeWorker({ sandboxStatus: { sandboxId: "sandbox-1", status: "working", healthCheck: { lastPing: Date.now(), consecutiveFailures: 0 } } });
+      const worker = makeWorker();
       const pool = createMockWorkerPool([worker]);
       const queue = createMockTaskQueue({ pending: 5, completed: 10, failed: 2, running: 1 });
       monitor = new Monitor(config, pool, queue);
@@ -203,40 +142,39 @@ describe("Monitor", () => {
       monitor = new Monitor(config, createMockWorkerPool(), createMockTaskQueue());
 
       let called = false;
-      let receivedSandboxId = "";
+      let receivedWorkerId = "";
       let receivedTaskId = "";
 
-      monitor.onEmptyDiff((sandboxId, taskId) => {
+      monitor.onEmptyDiff((workerId, taskId) => {
         called = true;
-        receivedSandboxId = sandboxId;
+        receivedWorkerId = workerId;
         receivedTaskId = taskId;
       });
 
-      monitor.recordEmptyDiff("sandbox-abc", "task-xyz");
+      monitor.recordEmptyDiff("ephemeral-abc", "task-xyz");
 
       assert.strictEqual(called, true);
-      assert.strictEqual(receivedSandboxId, "sandbox-abc");
+      assert.strictEqual(receivedWorkerId, "ephemeral-abc");
       assert.strictEqual(receivedTaskId, "task-xyz");
     });
   });
 
-  describe("getStuckWorkers", () => {
+  describe("getTimedOutWorkers", () => {
     it("filters correctly", () => {
       config = createConfig();
       const now = Date.now();
-      const staleTime = now - (config.stuckWorkerThreshold * 1000) - 10000;
+      const staleTime = now - (config.workerTimeout * 1000) - 10000;
 
-      const readyWorker = makeWorker({ id: "worker-1", sandboxStatus: { sandboxId: "worker-1", status: "ready", healthCheck: { lastPing: now, consecutiveFailures: 0 } }, lastHealthCheck: now });
-      const workingWorker = makeWorker({ id: "worker-2", sandboxStatus: { sandboxId: "worker-2", status: "working", healthCheck: { lastPing: now, consecutiveFailures: 0 } }, lastHealthCheck: now });
-      const stuckWorker = makeWorker({ id: "worker-3", sandboxStatus: { sandboxId: "worker-3", status: "working", healthCheck: { lastPing: staleTime, consecutiveFailures: 0 } }, lastHealthCheck: staleTime });
+      const recentWorker = makeWorker({ id: "worker-1", startedAt: now });
+      const timedOutWorker = makeWorker({ id: "worker-2", startedAt: staleTime });
 
-      const pool = createMockWorkerPool([readyWorker, workingWorker, stuckWorker]);
+      const pool = createMockWorkerPool([recentWorker, timedOutWorker]);
       monitor = new Monitor(config, pool, createMockTaskQueue());
 
-      const stuckWorkers = monitor.getStuckWorkers();
+      const timedOut = monitor.getTimedOutWorkers();
 
-      assert.strictEqual(stuckWorkers.length, 1);
-      assert.strictEqual(stuckWorkers[0].id, "worker-3");
+      assert.strictEqual(timedOut.length, 1);
+      assert.strictEqual(timedOut[0].id, "worker-2");
     });
   });
 });
