@@ -34,7 +34,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
   - `pnpm demo`
 - Seed a demo run:
   - `pnpm seed`
-  - Default seed runs at `1x` for `60s` and spawns `20` agents in the planner tree.
+  - Default seed runs at `1x` for `60s` and generates `20` planner-tree agents, `10` active git branches, and `30` commits.
 
 ## Run (one command per service)
 

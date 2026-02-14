@@ -4,6 +4,7 @@ import { fetch } from "undici";
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  AgentRole,
   AnyEventEnvelope,
   CommitStats,
   DiffFile,
@@ -13,6 +14,21 @@ import type {
 } from "@agent-swarm-visualizer/shared";
 
 const BASE_TIMELINE_MS = 60_000;
+const TARGET_AGENT_COUNT = 20;
+const TARGET_BRANCH_COUNT = 10;
+const TARGET_COMMIT_COUNT = 30;
+const BRANCH_NAMES = [
+  "main",
+  "feature/ui",
+  "feature/api",
+  "feature/replay",
+  "feature/tools",
+  "feature/tests",
+  "feature/docs",
+  "feature/ops",
+  "release/v1",
+  "hotfix/live-sync"
+] as const;
 
 function readEnvValue(key: string): string | undefined {
   const direct = process.env[key];
@@ -566,6 +582,38 @@ async function main() {
     payload: { ...agent }
   }));
 
+  const fixedAgentCount = 6 + extraAgents.length;
+  const generatedAgentCount = Math.max(0, TARGET_AGENT_COUNT - fixedAgentCount);
+  const generatedAgents: EventPayloadMap["agent.spawned"][] = [];
+  const generatedParentPool = [plannerA, plannerB, subA1, subA2, subB1, subB2, root];
+
+  for (let index = 0; index < generatedAgentCount; index += 1) {
+    const role: AgentRole = index % 8 === 0 ? "subplanner" : "worker";
+    const agentId = `agent-auto-${String(index + 1).padStart(2, "0")}`;
+    const parentAgentId =
+      generatedParentPool[Math.floor(rng() * generatedParentPool.length)] ?? generatedParentPool[0];
+    const namePrefix = role === "subplanner" ? "Auto Subplanner" : "Auto Worker";
+
+    generatedAgents.push({
+      agentId,
+      role,
+      parentAgentId,
+      name: `${namePrefix} ${String(index + 1).padStart(2, "0")}`
+    });
+
+    if (role === "subplanner") {
+      generatedParentPool.push(agentId);
+    }
+  }
+
+  const generatedSpawnEvents: Scheduled[] = generatedAgents.map((agent, index) => ({
+    offset: 17_200 + index * 220,
+    type: "agent.spawned",
+    payload: agent
+  }));
+
+  const allSpawnEvents = [...extraSpawnEvents, ...generatedSpawnEvents];
+
   const extraTaskSpecs = [
     { taskId: "task-ui-polish", ownerPlannerId: subA1, agentId: workerA1a, title: "UI polish pass" },
     { taskId: "task-ui-a11y", ownerPlannerId: subA1, agentId: workerA1b, title: "Accessibility audit" },
@@ -626,6 +674,120 @@ async function main() {
     ];
   });
 
+  const makeSyntheticDiff = (
+    commitNumber: number,
+    branch: string
+  ): {
+    files: DiffFile[];
+    unified: string;
+    stats: CommitStats;
+  } => {
+    const branchPath = branch.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    const fileCount = 2 + Math.floor(rng() * 2);
+    const files: DiffFile[] = [];
+
+    for (let fileIndex = 0; fileIndex < fileCount; fileIndex += 1) {
+      const pathId = (commitNumber + fileIndex) % 17;
+      const filePath = `swarm/${branchPath}/module-${pathId}.ts`;
+      const removed = 1 + Math.floor(rng() * 3);
+      const added = 2 + Math.floor(rng() * 4);
+      const patchLines = [
+        `--- a/${filePath}`,
+        `+++ b/${filePath}`,
+        `@@ -1,${removed} +1,${added} @@`
+      ];
+
+      for (let line = 0; line < removed; line += 1) {
+        patchLines.push(`-legacy_${commitNumber}_${fileIndex}_${line}();`);
+      }
+      for (let line = 0; line < added; line += 1) {
+        patchLines.push(`+next_${commitNumber}_${fileIndex}_${line}();`);
+      }
+      patchLines.push("");
+
+      files.push({
+        path: filePath,
+        status: "modified",
+        patch: patchLines.join("\n")
+      });
+    }
+
+    return {
+      files,
+      unified: buildUnified(files),
+      stats: buildStats(files)
+    };
+  };
+
+  const branchNames = [...BRANCH_NAMES].slice(0, TARGET_BRANCH_COUNT);
+  const dynamicCommitCount = Math.max(0, TARGET_COMMIT_COUNT - 5);
+  const commitAgentPool = [worker1, worker2, worker3, workerA1a, workerA1b, workerA2a, workerA2b, workerB1a, workerB1b, workerB2a, workerB2b, workerOps, workerDocs, ...generatedAgents.map((agent) => agent.agentId)];
+  const taskPool = [taskApi, taskUi, taskReplay, taskMerge, ...extraTaskSpecs.map((task) => task.taskId)];
+  const generatedCommitEvents: Scheduled[] = [];
+  const branchHeads: Record<string, string> = Object.fromEntries(branchNames.map((branch) => [branch, sha4]));
+  branchHeads.main = sha5;
+  branchHeads["feature/ui"] = sha2;
+
+  const generatedCommitStartOffset = 48_400;
+  const generatedCommitEndOffset = 56_900;
+  const generatedCommitWindow = Math.max(0, generatedCommitEndOffset - generatedCommitStartOffset);
+
+  for (let index = 0; index < dynamicCommitCount; index += 1) {
+    const commitNumber = index + 6;
+    const progress = dynamicCommitCount <= 1 ? 0 : index / (dynamicCommitCount - 1);
+    const offset = Math.round(generatedCommitStartOffset + progress * generatedCommitWindow);
+    const branch = branchNames[index % branchNames.length] ?? "main";
+    const primaryParent = branchHeads[branch] ?? sha5;
+    const mainHead = branchHeads.main ?? sha5;
+    const shouldMerge = commitNumber % 9 === 0 && mainHead !== primaryParent;
+    const parents = shouldMerge ? [primaryParent, mainHead] : [primaryParent];
+    const sha = deterministicSha(rng);
+    const diff = makeSyntheticDiff(commitNumber, branch);
+    const agentId = commitAgentPool[index % commitAgentPool.length] ?? worker1;
+    const taskId = taskPool[index % taskPool.length];
+
+    generatedCommitEvents.push({
+      offset,
+      type: "git.commit_created",
+      payload: {
+        sha,
+        parents,
+        branch,
+        agentId,
+        taskId,
+        message: `${shouldMerge ? "merge" : "feat"}: commit ${commitNumber} on ${branch}`,
+        stats: diff.stats,
+        diff: { files: diff.files, unified: diff.unified }
+      } satisfies GitCommitCreatedPayload
+    });
+
+    generatedCommitEvents.push({
+      offset: offset + 60,
+      type: "git.branch_updated",
+      payload: { branch, sha }
+    });
+
+    if (index % 2 === 0) {
+      const suite = branch.includes("release") ? "release-regression" : "swarm-regression";
+      generatedCommitEvents.push({
+        offset: offset + 120,
+        type: "tests.result",
+        payload: {
+          sha,
+          suite,
+          ok: rng() > 0.12,
+          durationMs: 500 + Math.floor(rng() * 2800),
+          output: `checks for commit ${commitNumber}`
+        }
+      });
+    }
+
+    branchHeads[branch] = sha;
+    if (branch === "main") {
+      branchHeads.main = sha;
+    }
+  }
+
   const schedule: Scheduled[] = [
     { offset: 0, type: "agent.spawned", payload: { agentId: root, role: "root_planner", name: "Root Planner" } },
     { offset: 1500, type: "agent.state_changed", payload: { agentId: root, state: "thinking", note: "Bootstrapping mission plan" } },
@@ -637,7 +799,7 @@ async function main() {
     { offset: 6200, type: "agent.spawned", payload: { agentId: worker1, role: "worker", parentAgentId: plannerA, name: "Worker UI" } },
     { offset: 6600, type: "agent.spawned", payload: { agentId: worker2, role: "worker", parentAgentId: plannerA, name: "Worker API" } },
     { offset: 7100, type: "agent.spawned", payload: { agentId: worker3, role: "worker", parentAgentId: plannerB, name: "Worker Tests" } },
-    ...extraSpawnEvents,
+    ...allSpawnEvents,
     { offset: 8200, type: "task.created", payload: { taskId: taskApi, ownerPlannerId: plannerB, title: "Backend event APIs" } },
     { offset: 8500, type: "task.created", payload: { taskId: taskUi, ownerPlannerId: plannerA, title: "Tree + timeline UI" } },
     { offset: 9000, type: "task.assigned", payload: { taskId: taskApi, agentId: worker2 } },
@@ -744,6 +906,7 @@ async function main() {
     },
     { offset: 47_200, type: "git.branch_updated", payload: { branch: "main", sha: sha5 } },
     { offset: 48_100, type: "tests.result", payload: { sha: sha5, suite: "smoke", ok: true, durationMs: 430, output: "dashboard starts" } },
+    ...generatedCommitEvents,
     ...extraTaskEvents,
     { offset: 57_200, type: "task.status_changed", payload: { taskId: taskPlan, status: "done" } },
     { offset: 57_600, type: "agent.state_changed", payload: { agentId: worker1, state: "done" } },
@@ -771,10 +934,16 @@ async function main() {
       .filter((event) => event.type === "agent.spawned")
       .map((event) => event.payload.agentId)
   ).size;
+  const commitCount = events.filter((event) => event.type === "git.commit_created").length;
+  const trackedBranchCount = new Set(
+    events
+      .filter((event) => event.type === "git.branch_updated")
+      .map((event) => event.payload.branch)
+  ).size;
 
   console.log(`[dummy-swarm] runId=${runId} name=${runName}`);
   console.log(
-    `[dummy-swarm] events=${events.length} seed=${seed} speed=${speed} duration=${durationSeconds}s agents=${spawnedAgentCount}`
+    `[dummy-swarm] events=${events.length} seed=${seed} speed=${speed} duration=${durationSeconds}s agents=${spawnedAgentCount} branches=${trackedBranchCount} commits=${commitCount}`
   );
 
   for (let index = 0; index < events.length; index += 1) {
