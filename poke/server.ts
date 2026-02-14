@@ -5,8 +5,8 @@
  * questions like "how's the swarm doing?" and get live metrics back.
  *
  * Usage:
- *   npx tsx poke-server.ts          # start the MCP server
- *   npx poke tunnel http://localhost:8787/mcp --name "AgentSwarm"  # tunnel it
+ *   npx tsx poke/server.ts
+ *   npx poke tunnel http://localhost:8787/mcp --name "AgentSwarm"
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

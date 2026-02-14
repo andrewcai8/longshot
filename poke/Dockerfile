@@ -16,7 +16,7 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY tsconfig.base.json ./
 COPY packages/ ./packages/
-COPY poke-server.ts ./
+COPY poke/ ./poke/
 COPY generated-repos/ ./generated-repos/
 
 # Build workspace
@@ -24,4 +24,4 @@ RUN pnpm build
 
 EXPOSE 8787
 
-CMD ["npx", "tsx", "poke-server.ts"]
+CMD ["npx", "tsx", "poke/server.ts"]

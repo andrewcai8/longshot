@@ -88,18 +88,12 @@ export class PokeNotifier {
 
   // --- Callback handlers to wire into orchestrator events ---
 
-  /**
-   * Called when a worker times out.
-   */
   async onWorkerTimeout(workerId: string, taskId: string): Promise<void> {
     await this.send(
       `Worker timeout: worker ${workerId} timed out on task ${taskId}. The task will be retried.`,
     );
   }
 
-  /**
-   * Called when the reconciler detects build/test failures and creates fix tasks.
-   */
   async onSweepComplete(fixTasks: Task[]): Promise<void> {
     if (fixTasks.length === 0) return;
     const taskList = fixTasks.map((t) => `- ${t.description.slice(0, 100)}`).join("\n");
@@ -108,9 +102,6 @@ export class PokeNotifier {
     );
   }
 
-  /**
-   * Called on each metrics update. Alerts if failed tasks exceed threshold.
-   */
   async onMetricsUpdate(snapshot: MetricsSnapshot): Promise<void> {
     if (snapshot.failedTasks >= this.config.failedTaskThreshold) {
       await this.send(
@@ -121,18 +112,12 @@ export class PokeNotifier {
     }
   }
 
-  /**
-   * Called when an empty diff is detected (worker did nothing).
-   */
   async onEmptyDiff(workerId: string, taskId: string): Promise<void> {
     await this.send(
       `Empty diff: worker ${workerId} produced no changes for task ${taskId}.`,
     );
   }
 
-  /**
-   * Called on orchestrator errors.
-   */
   async onError(error: Error): Promise<void> {
     await this.send(`Orchestrator error: ${error.message}`);
   }

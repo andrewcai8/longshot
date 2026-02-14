@@ -16,8 +16,8 @@ import { MergeQueue } from "./merge-queue.js";
 import { Monitor } from "./monitor.js";
 import { Planner } from "./planner.js";
 import { Reconciler } from "./reconciler.js";
-import { createPokeNotifier } from "./poke-notifier.js";
-import { PokeStateWriter } from "./poke-state-writer.js";
+import { createPokeNotifier } from "../../../poke/notifier.js";
+import { PokeStateWriter } from "../../../poke/state-writer.js";
 
 const logger = createLogger("orchestrator", "root-planner");
 
