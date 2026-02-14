@@ -4,4 +4,6 @@ export * from "./worker-pool.js";
 export * from "./merge-queue.js";
 export * from "./monitor.js";
 export * from "./llm-client.js";
+export * from "./shared.js";
 export * from "./planner.js";
+export * from "./subplanner.js";

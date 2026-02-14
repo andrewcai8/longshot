@@ -2,35 +2,20 @@
  * Root Planner - LLM-powered task decomposition and orchestration
  */
 
-import { readFile } from "node:fs/promises";
 import type { Task, Handoff } from "@agentswarm/core";
-import { createLogger, getRecentCommits, getFileTree, createBranch } from "@agentswarm/core";
+import { createLogger, createBranch } from "@agentswarm/core";
 import type { OrchestratorConfig } from "./config.js";
 import type { TaskQueue } from "./task-queue.js";
 import type { WorkerPool } from "./worker-pool.js";
 import type { MergeQueue } from "./merge-queue.js";
 import type { Monitor } from "./monitor.js";
 import { LLMClient, type LLMMessage } from "./llm-client.js";
+import { type RepoState, type RawTaskInput, readRepoState, parseLLMTaskArray } from "./shared.js";
 
 const logger = createLogger("planner", "root-planner");
 
-export interface RepoState {
-  fileTree: string[];
-  recentCommits: string[];
-  featuresJson: string | null;
-}
-
 export interface PlannerConfig {
   maxIterations: number;
-}
-
-interface RawTaskInput {
-  id?: string;
-  description: string;
-  scope?: string[];
-  acceptance?: string;
-  branch?: string;
-  priority?: number;
 }
 
 /**
@@ -50,6 +35,7 @@ export class Planner {
 
   private running: boolean;
   private taskCounter: number;
+  private dispatchLock: Promise<void> = Promise.resolve();
 
   private taskCreatedCallbacks: ((task: Task) => void)[];
   private taskCompletedCallbacks: ((task: Task, handoff: Handoff) => void)[];
@@ -82,6 +68,7 @@ export class Planner {
       model: config.llm.model,
       maxTokens: config.llm.maxTokens,
       temperature: config.llm.temperature,
+      apiKey: config.llm.apiKey,
     });
 
     this.taskCreatedCallbacks = [];
@@ -161,25 +148,8 @@ export class Planner {
     return this.running;
   }
 
-  /**
-   * Read current repository state (file tree, recent commits, features)
-   */
   async readRepoState(): Promise<RepoState> {
-    const cwd = this.targetRepoPath;
-
-    const fileTree = await getFileTree(cwd);
-
-    const commits = await getRecentCommits(15, cwd);
-    const recentCommits = commits.map((c) => `${c.hash.slice(0, 8)} ${c.message} (${c.author})`);
-
-    let featuresJson: string | null = null;
-    try {
-      featuresJson = await readFile(`${cwd}/FEATURES.json`, "utf-8");
-    } catch {
-      // FEATURES.json may not exist yet
-    }
-
-    return { fileTree, recentCommits, featuresJson };
+    return readRepoState(this.targetRepoPath);
   }
 
   /**
@@ -216,7 +186,7 @@ export class Planner {
     const response = await this.llmClient.complete(messages);
     this.monitor.recordTokenUsage(response.usage.totalTokens);
 
-    const rawTasks = this.parseTasksFromResponse(response.content);
+    const rawTasks = parseLLMTaskArray(response.content);
 
     const tasks: Task[] = rawTasks.map((raw) => {
       this.taskCounter++;
@@ -237,42 +207,6 @@ export class Planner {
   }
 
   /**
-   * Parse JSON tasks from LLM response
-   */
-  private parseTasksFromResponse(content: string): RawTaskInput[] {
-    let cleaned = content.trim();
-
-    // Strip markdown code block if present
-    if (cleaned.startsWith("```")) {
-      const firstNewline = cleaned.indexOf("\n");
-      const lastBackticks = cleaned.lastIndexOf("```");
-      if (firstNewline !== -1 && lastBackticks > firstNewline) {
-        cleaned = cleaned.slice(firstNewline + 1, lastBackticks).trim();
-      }
-    }
-
-    // Find the JSON array in the response
-    const arrayStart = cleaned.indexOf("[");
-    const arrayEnd = cleaned.lastIndexOf("]");
-    if (arrayStart !== -1 && arrayEnd > arrayStart) {
-      cleaned = cleaned.slice(arrayStart, arrayEnd + 1);
-    }
-
-    try {
-      const parsed = JSON.parse(cleaned);
-      if (!Array.isArray(parsed)) {
-        throw new Error("LLM response is not an array");
-      }
-      return parsed;
-    } catch (error) {
-      logger.error("Failed to parse LLM response as tasks", { content: content.slice(0, 500) });
-      throw new Error(
-        `Failed to parse LLM task decomposition: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  }
-
-  /**
    * Execute tasks by enqueueing and assigning to workers
    */
   async executeTasks(tasks: Task[]): Promise<Handoff[]> {
@@ -289,23 +223,34 @@ export class Planner {
 
     for (const task of tasks) {
       const promise = (async () => {
-        // Wait for an available worker
+        let releaseLock: () => void;
+        const waitForLock = this.dispatchLock;
+        this.dispatchLock = new Promise((resolve) => { releaseLock = resolve; });
+        await waitForLock;
+
+        const deadline = Date.now() + this.config.workerTimeout * 1000;
         while (this.workerPool.getAvailableWorkers().length === 0) {
+          if (Date.now() > deadline) {
+            releaseLock!();
+            throw new Error(`Timed out waiting for available worker for task ${task.id}`);
+          }
           await new Promise((resolve) => setTimeout(resolve, 1000));
-          if (!this.running) throw new Error("Planner stopped");
+          if (!this.running) {
+            releaseLock!();
+            throw new Error("Planner stopped");
+          }
         }
 
-        // Create the task branch in the target repo
         try {
           await createBranch(task.branch, this.targetRepoPath);
         } catch {
           // Branch may already exist
         }
 
-        // Assign to available worker and start
         const availableWorker = this.workerPool.getAvailableWorkers()[0];
         this.taskQueue.assignTask(task.id, availableWorker.id);
         this.taskQueue.startTask(task.id);
+        releaseLock!();
 
         try {
           const handoff = await this.workerPool.assignTask(task);
