@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PI.DEV — Agent Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: #0a0a0a;
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .slide {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  /* ── Ambient glow behind the ring ── */
+  .ambient {
+    position: absolute;
+    width: 640px;
+    height: 640px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(120,80,220,0.07) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* ── The PI.DEV harness ring ── */
+  .harness-ring {
+    position: relative;
+    width: 560px;
+    height: 560px;
+  }
+
+  .ring-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Rotating dashed orbit */
+  .orbit {
+    fill: none;
+    stroke: rgba(167,139,250,0.2);
+    stroke-width: 1;
+    stroke-dasharray: 8 6;
+    animation: spin 60s linear infinite;
+    transform-origin: 280px 280px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Solid subtle ring */
+  .ring-solid {
+    fill: none;
+    stroke: rgba(255,255,255,0.06);
+    stroke-width: 1;
+  }
+
+  /* Accent arc that sweeps */
+  .ring-accent {
+    fill: none;
+    stroke: url(#arcGrad);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 200 1560;
+    animation: sweep 8s ease-in-out infinite;
+    transform-origin: 280px 280px;
+  }
+
+  @keyframes sweep {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* PI.DEV label on ring */
+  .ring-label {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: #a78bfa;
+    background: #0a0a0a;
+    padding: 2px 14px;
+    z-index: 10;
+  }
+
+  .ring-label-bottom {
+    position: absolute;
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: rgba(255,255,255,0.25);
+    background: #0a0a0a;
+    padding: 2px 12px;
+    z-index: 10;
+  }
+
+  /* ── Inner flowchart ── */
+  .inner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 50px;
+  }
+
+  /* ── Connector SVG ── */
+  .connectors {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .connectors line {
+    stroke: rgba(255,255,255,0.1);
+    stroke-width: 1;
+  }
+
+  .connectors .arrow {
+    fill: rgba(255,255,255,0.12);
+  }
+
+  /* Animated particles on lines */
+  .particle {
+    fill: rgba(167,139,250,0.6);
+    r: 2;
+  }
+
+  /* ── Node styling ── */
+  .node {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.9);
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.03);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+    transition: all 0.25s;
+  }
+
+  .node:hover {
+    border-color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.06);
+  }
+
+  .node .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 400;
+    padding: 2px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+  }
+
+  .tag-gpt {
+    color: rgba(129,140,248,0.8);
+    background: rgba(129,140,248,0.1);
+    border: 1px solid rgba(129,140,248,0.15);
+  }
+
+  .tag-glm {
+    color: rgba(74,222,128,0.8);
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.15);
+  }
+
+  .recurse-icon {
+    color: rgba(192,132,252,0.6);
+    font-size: 14px;
+  }
+
+  /* ── Layout rows ── */
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .spacer {
+    height: 36px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .spacer-sm { height: 28px; }
+
+  /* Vertical tick marks in spacers */
+  .tick {
+    width: 1px;
+    height: 100%;
+    margin: 0 auto;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+    position: relative;
+  }
+
+  .tick::after {
+    content: '';
+    position: absolute;
+    bottom: -3px;
+    left: -2px;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 4px solid rgba(255,255,255,0.12);
+  }
+
+  /* Fan lines for subplanner children */
+  .fan-lines {
+    position: relative;
+    width: 200px;
+    height: 24px;
+    z-index: 1;
+  }
+
+  .fan-lines svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  /* Branch lines from all workers to git */
+  .merge-lines {
+    position: relative;
+    width: 420px;
+    height: 28px;
+    z-index: 1;
+  }
+
+  .merge-lines svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  /* ── Git node special ── */
+  .node-git {
+    border-color: rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    padding: 10px 32px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Planner node special ── */
+  .node-planner {
+    border-radius: 24px;
+    border-color: rgba(129,140,248,0.2);
+    background: rgba(129,140,248,0.04);
+    padding: 11px 28px;
+  }
+
+  /* ── Terminal bar at bottom ── */
+  .terminal {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(4px);
+    z-index: 10;
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 5px;
+  }
+
+  .terminal-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .td-r { background: #ff5f57; }
+  .td-y { background: #febc2e; }
+  .td-g { background: #28c840; }
+
+  .terminal-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+  }
+
+  .terminal-text .hl { color: rgba(167,139,250,0.7); }
+  .terminal-text .ok { color: rgba(74,222,128,0.7); }
+
+  /* ── Connector line from ring to terminal ── */
+  .ring-to-terminal {
+    position: absolute;
+    bottom: 52px;
+    left: 50%;
+    width: 1px;
+    height: 32px;
+    background: linear-gradient(to bottom, rgba(167,139,250,0.15), rgba(167,139,250,0.06));
+    z-index: 5;
+  }
+
+  .ring-to-terminal::after {
+    content: '';
+    position: absolute;
+    bottom: -3px;
+    left: -2px;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 4px solid rgba(167,139,250,0.2);
+  }
+
+  /* ── Decorative corner marks ── */
+  .corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-color: rgba(255,255,255,0.06);
+    z-index: 10;
+    pointer-events: none;
+  }
+  .corner-tl { top: 16px; left: 16px; border-top: 1px solid; border-left: 1px solid; }
+  .corner-tr { top: 16px; right: 16px; border-top: 1px solid; border-right: 1px solid; }
+  .corner-bl { bottom: 16px; left: 16px; border-bottom: 1px solid; border-left: 1px solid; }
+  .corner-br { bottom: 16px; right: 16px; border-bottom: 1px solid; border-right: 1px solid; }
+</style>
+</head>
+<body>
+<div class="slide">
+
+  <!-- Corner marks -->
+  <div class="corner corner-tl"></div>
+  <div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div>
+  <div class="corner corner-br"></div>
+
+  <!-- Ambient glow -->
+  <div class="ambient"></div>
+
+  <!-- Harness ring -->
+  <div class="harness-ring">
+    <div class="ring-label">PI.DEV HARNESS</div>
+    <div class="ring-label-bottom">SDK ORCHESTRATION LAYER</div>
+
+    <svg class="ring-svg" viewBox="0 0 560 560">
+      <defs>
+        <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="rgba(167,139,250,0)" />
+          <stop offset="50%" stop-color="rgba(167,139,250,0.5)" />
+          <stop offset="100%" stop-color="rgba(167,139,250,0)" />
+        </linearGradient>
+      </defs>
+      <circle class="ring-solid" cx="280" cy="280" r="274"/>
+      <circle class="orbit" cx="280" cy="280" r="274"/>
+      <circle class="ring-accent" cx="280" cy="280" r="274"/>
+    </svg>
+
+    <!-- Inner flowchart -->
+    <div class="inner">
+
+      <!-- Planner -->
+      <div class="row">
+        <div class="node node-planner">Planner <span class="tag tag-gpt">GPT</span></div>
+      </div>
+
+      <!-- Planner → children lines -->
+      <div class="spacer"><div class="tick"></div></div>
+
+      <!-- Row 2: Subplanner + Workers -->
+      <div class="row" id="row2">
+        <div class="node">Subplanner <span class="recurse-icon">&#x21bb;</span> <span class="tag tag-gpt">GPT</span></div>
+        <div class="node">Worker <span class="tag tag-glm">GLM-5</span></div>
+        <div class="node">Worker <span class="tag tag-glm">GLM-5</span></div>
+      </div>
+
+      <!-- Subplanner fan-out -->
+      <div class="spacer spacer-sm">
+        <div class="fan-lines">
+          <svg viewBox="0 0 200 24">
+            <line x1="100" y1="0" x2="100" y2="8" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <line x1="40" y1="8" x2="160" y2="8" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <line x1="40" y1="8" x2="40" y2="22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <polygon points="37,22 43,22 40,26" fill="rgba(255,255,255,0.1)"/>
+            <line x1="160" y1="8" x2="160" y2="22" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <polygon points="157,22 163,22 160,26" fill="rgba(255,255,255,0.1)"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Row 3: Sub-workers -->
+      <div class="row">
+        <div class="node">Worker <span class="tag tag-glm">GLM-5</span></div>
+        <div class="node">Worker <span class="tag tag-glm">GLM-5</span></div>
+      </div>
+
+      <!-- Merge into git -->
+      <div class="spacer">
+        <div class="merge-lines">
+          <svg viewBox="0 0 420 28">
+            <!-- 4 lines converging to center bottom -->
+            <line x1="60" y1="0" x2="60" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <line x1="160" y1="0" x2="160" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <line x1="260" y1="0" x2="260" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <line x1="360" y1="0" x2="360" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <!-- Horizontal gather -->
+            <line x1="60" y1="8" x2="360" y2="8" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+            <!-- Single drop -->
+            <line x1="210" y1="8" x2="210" y2="24" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <polygon points="207,24 213,24 210,28" fill="rgba(255,255,255,0.1)"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Git -->
+      <div class="row">
+        <div class="node node-git">Git</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Connector from ring to terminal -->
+  <div class="ring-to-terminal"></div>
+
+  <!-- Rich Terminal UI bar -->
+  <div class="terminal">
+    <div class="terminal-dots">
+      <span class="td-r"></span>
+      <span class="td-y"></span>
+      <span class="td-g"></span>
+    </div>
+    <div class="terminal-text">
+      <span class="hl">pi.dev</span> run &mdash; <span class="ok">4 workers active</span> &middot; main is green
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
