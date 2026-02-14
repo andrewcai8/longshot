@@ -20,6 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsc && node --test dist/__tests__/sandbox.test.js",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   }
