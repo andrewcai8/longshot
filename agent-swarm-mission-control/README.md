@@ -76,6 +76,9 @@ pnpm --filter dummy-swarm dev -- --run-name "Treehacks Demo" --seed 42 --speed 3
 
 ## API Contract
 
+Detailed backend API contract (human + model-readable JSON):
+- `docs/API_BACKEND_CONTRACT.md`
+
 Implemented endpoints:
 
 - `POST /v1/runs`
