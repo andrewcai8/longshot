@@ -69,23 +69,44 @@ export function MissionControl() {
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const eventIdsRef = useRef<Set<string>>(new Set());
+  const connectionStatusRef = useRef(connectionStatus);
 
   const currentAt = mode === "live" ? maxTs(events) : scrubberAt;
   const state = useMemo(() => deriveStateFromEvents(events, currentAt), [events, currentAt]);
 
   useEffect(() => {
-    void (async () => {
+    connectionStatusRef.current = connectionStatus;
+  }, [connectionStatus]);
+
+  useEffect(() => {
+    let active = true;
+
+    const refreshRuns = async () => {
       try {
         const data = await listRuns();
-        setRuns(data.runs);
-        if (!selectedRunId && data.runs[0]) {
-          setSelectedRunId(data.runs[0].runId);
+        if (!active) {
+          return;
         }
+        setRuns(data.runs);
+        setSelectedRunId((previous) => previous ?? data.runs[0]?.runId);
       } catch (nextError) {
+        if (!active) {
+          return;
+        }
         setError(nextError instanceof Error ? nextError.message : "Unable to load runs");
       }
-    })();
-  }, [selectedRunId]);
+    };
+
+    void refreshRuns();
+    const intervalId = window.setInterval(() => {
+      void refreshRuns();
+    }, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -121,22 +142,89 @@ export function MissionControl() {
       return;
     }
 
-    const socket = connectStream(
-      selectedRunId,
-      (event) => {
-        if (eventIdsRef.current.has(event.eventId)) {
-          return;
-        }
-        eventIdsRef.current.add(event.eventId);
-        setEvents((previous) => asSorted([...previous, event]));
-      },
-      (status) => setConnectionStatus(status)
-    );
+    let cancelled = false;
+    let reconnectTimer: number | undefined;
+    let reconnectScheduled = false;
 
-    wsRef.current = socket;
+    const openSocket = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const socket = connectStream(
+        selectedRunId,
+        (event) => {
+          if (eventIdsRef.current.has(event.eventId)) {
+            return;
+          }
+          eventIdsRef.current.add(event.eventId);
+          setEvents((previous) => asSorted([...previous, event]));
+        },
+        (status) => {
+          setConnectionStatus(status);
+
+          if (status === "live") {
+            reconnectScheduled = false;
+            if (reconnectTimer !== undefined) {
+              window.clearTimeout(reconnectTimer);
+              reconnectTimer = undefined;
+            }
+            return;
+          }
+
+          if ((status === "closed" || status === "error") && !cancelled && !reconnectScheduled) {
+            reconnectScheduled = true;
+            reconnectTimer = window.setTimeout(() => {
+              reconnectScheduled = false;
+              openSocket();
+            }, 1000);
+          }
+        }
+      );
+
+      wsRef.current = socket;
+    };
+
+    openSocket();
 
     return () => {
-      socket.close();
+      cancelled = true;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+      }
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [mode, selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId || mode !== "live") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        if (connectionStatusRef.current === "live") {
+          return;
+        }
+        try {
+          const response = await getEvents(selectedRunId);
+          const unseen = response.events.filter((event) => !eventIdsRef.current.has(event.eventId));
+          if (unseen.length === 0) {
+            return;
+          }
+          for (const event of unseen) {
+            eventIdsRef.current.add(event.eventId);
+          }
+          setEvents((previous) => asSorted([...previous, ...unseen]));
+        } catch {
+          // Keep silent: websocket is primary transport and polling is best-effort fallback.
+        }
+      })();
+    }, 1500);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, [mode, selectedRunId]);
 

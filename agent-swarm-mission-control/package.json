@@ -11,7 +11,7 @@
     "dev:dashboard": "pnpm --filter dashboard dev",
     "dev": "sh -c 'pnpm run dev:backend & pnpm run dev:dashboard & wait'",
     "demo": "sh -c 'pnpm run dev:backend & pnpm run dev:dashboard & sleep 4 && pnpm seed && wait'",
-    "seed": "pnpm --filter dummy-swarm exec tsx src/index.ts --run-name \"Demo Run\" --seed 1 --speed 20",
+    "seed": "pnpm --filter dummy-swarm exec tsx src/index.ts --run-name \"Demo Run\" --seed 1 --speed 1 --duration 60",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
   }

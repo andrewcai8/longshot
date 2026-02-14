@@ -34,6 +34,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
   - `pnpm demo`
 - Seed a demo run:
   - `pnpm seed`
+  - Default seed runs at `1x` for `60s` and spawns `20` agents in the planner tree.
 
 ## Run (one command per service)
 
@@ -42,7 +43,7 @@ Local-first, event-sourced dashboard for agent swarm runs.
 - Dashboard only:
   - `pnpm dev:dashboard`
 - Dummy swarm only:
-  - `pnpm --filter dummy-swarm dev -- --run-name "Demo Run" --seed 1 --speed 20 --duration 90`
+  - `pnpm --filter dummy-swarm dev -- --run-name "Demo Run" --seed 1 --speed 1 --duration 60`
   - The dummy swarm exercises convenience APIs (`/v1/agents/*`, `/v1/tasks/*`, `/v1/git/*`, `/v1/tests/result`) and uses `/v1/events` for tool-call events.
 
 ## URLs

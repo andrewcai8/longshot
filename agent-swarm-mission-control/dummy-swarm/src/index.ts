@@ -481,15 +481,15 @@ async function main() {
     string: ["run-name", "base-time"],
     default: {
       seed: 1,
-      speed: 20,
-      duration: 90
+      speed: 1,
+      duration: 60
     }
   });
 
   const runName = String(args["run-name"] ?? "Demo Run");
   const seed = Number(args.seed ?? 1);
-  const speed = Math.max(0.1, Number(args.speed ?? 20));
-  const durationSeconds = Math.max(10, Number(args.duration ?? 90));
+  const speed = Math.max(0.1, Number(args.speed ?? 1));
+  const durationSeconds = Math.max(10, Number(args.duration ?? 60));
   const durationMs = durationSeconds * 1000;
   const baseTime = parseBaseTime(args["base-time"]);
 
@@ -508,6 +508,20 @@ async function main() {
   const worker1 = "agent-worker-1";
   const worker2 = "agent-worker-2";
   const worker3 = "agent-worker-3";
+  const subA1 = "agent-subplanner-a1";
+  const subA2 = "agent-subplanner-a2";
+  const subB1 = "agent-subplanner-b1";
+  const subB2 = "agent-subplanner-b2";
+  const workerA1a = "agent-worker-a1a";
+  const workerA1b = "agent-worker-a1b";
+  const workerA2a = "agent-worker-a2a";
+  const workerA2b = "agent-worker-a2b";
+  const workerB1a = "agent-worker-b1a";
+  const workerB1b = "agent-worker-b1b";
+  const workerB2a = "agent-worker-b2a";
+  const workerB2b = "agent-worker-b2b";
+  const workerOps = "agent-worker-ops";
+  const workerDocs = "agent-worker-docs";
 
   const taskPlan = "task-plan";
   const taskApi = "task-api";
@@ -529,6 +543,89 @@ async function main() {
     payload: EventPayloadMap[EventType];
   };
 
+  const extraAgents = [
+    { agentId: subA1, role: "subplanner", parentAgentId: plannerA, name: "Subplanner A1" },
+    { agentId: subA2, role: "subplanner", parentAgentId: plannerA, name: "Subplanner A2" },
+    { agentId: subB1, role: "subplanner", parentAgentId: plannerB, name: "Subplanner B1" },
+    { agentId: subB2, role: "subplanner", parentAgentId: plannerB, name: "Subplanner B2" },
+    { agentId: workerA1a, role: "worker", parentAgentId: subA1, name: "Worker A1A" },
+    { agentId: workerA1b, role: "worker", parentAgentId: subA1, name: "Worker A1B" },
+    { agentId: workerA2a, role: "worker", parentAgentId: subA2, name: "Worker A2A" },
+    { agentId: workerA2b, role: "worker", parentAgentId: subA2, name: "Worker A2B" },
+    { agentId: workerB1a, role: "worker", parentAgentId: subB1, name: "Worker B1A" },
+    { agentId: workerB1b, role: "worker", parentAgentId: subB1, name: "Worker B1B" },
+    { agentId: workerB2a, role: "worker", parentAgentId: subB2, name: "Worker B2A" },
+    { agentId: workerB2b, role: "worker", parentAgentId: subB2, name: "Worker B2B" },
+    { agentId: workerOps, role: "worker", parentAgentId: root, name: "Ops Worker" },
+    { agentId: workerDocs, role: "worker", parentAgentId: root, name: "Docs Worker" }
+  ] as const;
+
+  const extraSpawnEvents: Scheduled[] = extraAgents.map((agent, index) => ({
+    offset: 7600 + index * 680,
+    type: "agent.spawned",
+    payload: { ...agent }
+  }));
+
+  const extraTaskSpecs = [
+    { taskId: "task-ui-polish", ownerPlannerId: subA1, agentId: workerA1a, title: "UI polish pass" },
+    { taskId: "task-ui-a11y", ownerPlannerId: subA1, agentId: workerA1b, title: "Accessibility audit" },
+    { taskId: "task-api-auth", ownerPlannerId: subA2, agentId: workerA2a, title: "Auth middleware hardening" },
+    { taskId: "task-api-cache", ownerPlannerId: subA2, agentId: workerA2b, title: "Cache layer tuning" },
+    { taskId: "task-tests-unit", ownerPlannerId: subB1, agentId: workerB1a, title: "Unit test expansion" },
+    { taskId: "task-tests-e2e", ownerPlannerId: subB1, agentId: workerB1b, title: "E2E smoke suite" },
+    { taskId: "task-docs-api", ownerPlannerId: subB2, agentId: workerB2a, title: "API docs update" },
+    { taskId: "task-infra-alerts", ownerPlannerId: subB2, agentId: workerB2b, title: "Alerting policy setup" },
+    { taskId: "task-ops-dash", ownerPlannerId: root, agentId: workerOps, title: "Ops dashboard checks" },
+    { taskId: "task-release-notes", ownerPlannerId: root, agentId: workerDocs, title: "Release notes draft" }
+  ] as const;
+
+  const extraTaskEvents: Scheduled[] = extraTaskSpecs.flatMap((task, index) => {
+    const start = 18_000 + index * 1_450;
+    return [
+      {
+        offset: start,
+        type: "task.created",
+        payload: {
+          taskId: task.taskId,
+          ownerPlannerId: task.ownerPlannerId,
+          title: task.title
+        }
+      },
+      {
+        offset: start + 260,
+        type: "task.assigned",
+        payload: {
+          taskId: task.taskId,
+          agentId: task.agentId
+        }
+      },
+      {
+        offset: start + 620,
+        type: "task.status_changed",
+        payload: {
+          taskId: task.taskId,
+          status: "in_progress"
+        }
+      },
+      {
+        offset: 45_500 + index * 820,
+        type: "task.status_changed",
+        payload: {
+          taskId: task.taskId,
+          status: "done"
+        }
+      },
+      {
+        offset: 55_000 + index * 240,
+        type: "agent.state_changed",
+        payload: {
+          agentId: task.agentId,
+          state: "done"
+        }
+      }
+    ];
+  });
+
   const schedule: Scheduled[] = [
     { offset: 0, type: "agent.spawned", payload: { agentId: root, role: "root_planner", name: "Root Planner" } },
     { offset: 1500, type: "agent.state_changed", payload: { agentId: root, state: "thinking", note: "Bootstrapping mission plan" } },
@@ -540,6 +637,7 @@ async function main() {
     { offset: 6200, type: "agent.spawned", payload: { agentId: worker1, role: "worker", parentAgentId: plannerA, name: "Worker UI" } },
     { offset: 6600, type: "agent.spawned", payload: { agentId: worker2, role: "worker", parentAgentId: plannerA, name: "Worker API" } },
     { offset: 7100, type: "agent.spawned", payload: { agentId: worker3, role: "worker", parentAgentId: plannerB, name: "Worker Tests" } },
+    ...extraSpawnEvents,
     { offset: 8200, type: "task.created", payload: { taskId: taskApi, ownerPlannerId: plannerB, title: "Backend event APIs" } },
     { offset: 8500, type: "task.created", payload: { taskId: taskUi, ownerPlannerId: plannerA, title: "Tree + timeline UI" } },
     { offset: 9000, type: "task.assigned", payload: { taskId: taskApi, agentId: worker2 } },
@@ -646,13 +744,14 @@ async function main() {
     },
     { offset: 47_200, type: "git.branch_updated", payload: { branch: "main", sha: sha5 } },
     { offset: 48_100, type: "tests.result", payload: { sha: sha5, suite: "smoke", ok: true, durationMs: 430, output: "dashboard starts" } },
-    { offset: 50_500, type: "task.status_changed", payload: { taskId: taskPlan, status: "done" } },
-    { offset: 52_200, type: "agent.state_changed", payload: { agentId: worker1, state: "done" } },
-    { offset: 52_400, type: "agent.state_changed", payload: { agentId: worker2, state: "done" } },
-    { offset: 52_600, type: "agent.state_changed", payload: { agentId: worker3, state: "done" } },
-    { offset: 53_000, type: "agent.state_changed", payload: { agentId: plannerA, state: "done" } },
-    { offset: 53_400, type: "agent.state_changed", payload: { agentId: plannerB, state: "done" } },
-    { offset: 54_000, type: "agent.state_changed", payload: { agentId: root, state: "done", note: "Mission complete" } }
+    ...extraTaskEvents,
+    { offset: 57_200, type: "task.status_changed", payload: { taskId: taskPlan, status: "done" } },
+    { offset: 57_600, type: "agent.state_changed", payload: { agentId: worker1, state: "done" } },
+    { offset: 57_800, type: "agent.state_changed", payload: { agentId: worker2, state: "done" } },
+    { offset: 58_000, type: "agent.state_changed", payload: { agentId: worker3, state: "done" } },
+    { offset: 58_400, type: "agent.state_changed", payload: { agentId: plannerA, state: "done" } },
+    { offset: 58_700, type: "agent.state_changed", payload: { agentId: plannerB, state: "done" } },
+    { offset: 59_500, type: "agent.state_changed", payload: { agentId: root, state: "done", note: "Mission complete" } }
   ];
 
   const scale = durationMs / BASE_TIMELINE_MS;
@@ -667,8 +766,16 @@ async function main() {
     }) as AnyEventEnvelope)
     .sort((a, b) => (a.ts === b.ts ? a.eventId.localeCompare(b.eventId) : a.ts - b.ts));
 
+  const spawnedAgentCount = new Set(
+    events
+      .filter((event) => event.type === "agent.spawned")
+      .map((event) => event.payload.agentId)
+  ).size;
+
   console.log(`[dummy-swarm] runId=${runId} name=${runName}`);
-  console.log(`[dummy-swarm] events=${events.length} seed=${seed} speed=${speed} duration=${durationSeconds}s`);
+  console.log(
+    `[dummy-swarm] events=${events.length} seed=${seed} speed=${speed} duration=${durationSeconds}s agents=${spawnedAgentCount}`
+  );
 
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];

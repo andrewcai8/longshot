@@ -26,7 +26,11 @@ import { config } from "./config";
 import { createDatabase } from "./db";
 import { MissionControlStore } from "./store";
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({
+  logger: {
+    level: process.env.LOG_LEVEL ?? "warn"
+  }
+});
 const db = createDatabase(config.dbPath);
 const store = new MissionControlStore(db);
 
@@ -38,7 +42,7 @@ await fastify.register(cors, {
 await fastify.register(websocket);
 
 function sendMessage(socket: any, message: StreamServerMessage): void {
-  if (socket.readyState === 1) {
+  if (socket && socket.readyState === 1) {
     socket.send(JSON.stringify(message));
   }
 }
@@ -272,29 +276,30 @@ fastify.post("/v1/tests/result", async (request, reply) => {
 fastify.get(
   "/v1/stream",
   { websocket: true },
-  (connection, request) => {
-    sendMessage(connection.socket, { type: "hello", serverTime: Date.now() });
+  (socket, request) => {
+    sendMessage(socket, { type: "hello", serverTime: Date.now() });
 
     const queryResult = runIdQuerySchema.partial().safeParse(request.query);
     if (queryResult.success && queryResult.data.runId) {
-      subscribers.set(connection.socket, queryResult.data.runId);
+      subscribers.set(socket, queryResult.data.runId);
     }
 
-    connection.socket.on("message", (raw: Buffer) => {
+    socket.on("message", (raw: Buffer | string) => {
       try {
-        const parsedJson = JSON.parse(raw.toString()) as unknown;
+        const text = typeof raw === "string" ? raw : raw.toString("utf8");
+        const parsedJson = JSON.parse(text) as unknown;
         const parsed = subscribeMessageSchema.safeParse(parsedJson);
         if (!parsed.success) {
           return;
         }
-        subscribers.set(connection.socket, parsed.data.runId);
+        subscribers.set(socket, parsed.data.runId);
       } catch {
         return;
       }
     });
 
-    connection.socket.on("close", () => {
-      subscribers.delete(connection.socket);
+    socket.on("close", () => {
+      subscribers.delete(socket);
     });
   }
 );
