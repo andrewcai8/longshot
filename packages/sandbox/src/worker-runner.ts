@@ -1,6 +1,12 @@
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import type { Task, Handoff } from "@agentswarm/core";
+import {
+  enableTracing,
+  closeTracing,
+  Tracer,
+  type Span,
+} from "@agentswarm/core";
 import {
   AuthStorage,
   createAgentSession,
@@ -16,6 +22,38 @@ import {
 const TASK_PATH = "/workspace/task.json";
 const RESULT_PATH = "/workspace/result.json";
 const WORK_DIR = "/workspace/repo";
+
+const ARTIFACT_PATTERNS = [
+  /^node_modules\//,
+  /^\.next\//,
+  /^dist\//,
+  /^build\//,
+  /^out\//,
+  /^\.turbo\//,
+  /^\.tsbuildinfo$/,
+  /^package-lock\.json$/,
+  /^pnpm-lock\.yaml$/,
+  /^yarn\.lock$/,
+  /^\.pnpm-store\//,
+];
+
+const GITIGNORE_ESSENTIALS = [
+  "node_modules/",
+  ".next/",
+  "dist/",
+  "build/",
+  "out/",
+  ".turbo/",
+  "*.tsbuildinfo",
+  ".pnpm-store/",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+].join("\n");
+
+function isArtifact(filePath: string): boolean {
+  return ARTIFACT_PATTERNS.some((p) => p.test(filePath));
+}
 
 /**
  * Parent directory of the repo. Pi walks up from cwd to discover AGENTS.md,
@@ -46,6 +84,11 @@ interface TaskPayload {
     apiKey?: string;
   };
   repoUrl?: string;
+  /** Trace propagation context from the orchestrator. */
+  trace?: {
+    traceId: string;
+    parentSpanId: string;
+  };
 }
 
 function log(msg: string): void {
@@ -88,6 +131,17 @@ export async function runWorker(): Promise<void> {
   const { task, systemPrompt, llmConfig } = payload;
   log(`Task: ${task.id} — ${task.description.slice(0, 80)}`);
 
+  enableTracing("/workspace");
+  let workerSpan: Span | undefined;
+  if (payload.trace) {
+    const tracer = Tracer.fromPropagated(payload.trace);
+    workerSpan = tracer.startSpan("sandbox.worker", {
+      taskId: task.id,
+      agentId: `sandbox-${task.id}`,
+    });
+    log(`Tracing enabled — traceId=${payload.trace.traceId}`);
+  }
+
   // Write worker instructions as AGENTS.md in /workspace/ (parent of repo cwd).
   // Pi auto-discovers AGENTS.md by walking up from cwd, so both this file and
   // any AGENTS.md in the target repo itself get loaded and concatenated.
@@ -112,7 +166,7 @@ export async function runWorker(): Promise<void> {
       maxTokens: llmConfig.maxTokens,
       compat: {
         maxTokensField: "max_tokens",
-        supportsUsageInStreaming: false,
+        supportsUsageInStreaming: true,
       },
     }],
   });
@@ -124,6 +178,7 @@ export async function runWorker(): Promise<void> {
   log(`Model registered: ${llmConfig.model} via ${llmConfig.endpoint}`);
 
   const startSha = safeExec("git rev-parse HEAD", WORK_DIR);
+  workerSpan?.event("sandbox.agentSessionCreate");
   log("Creating agent session (full Pi capabilities)...");
   const { session } = await createAgentSession({
     cwd: WORK_DIR,
@@ -173,8 +228,10 @@ export async function runWorker(): Promise<void> {
   });
 
   const prompt = buildTaskPrompt(task);
+  workerSpan?.event("sandbox.agentPromptStart");
   log("Running agent prompt...");
   await session.prompt(prompt);
+  workerSpan?.event("sandbox.agentPromptEnd");
   log("Agent prompt completed.");
 
   const stats = session.getSessionStats();
@@ -182,36 +239,64 @@ export async function runWorker(): Promise<void> {
 
   session.dispose();
 
-  // Safety-net: commit any uncommitted changes the agent left behind.
-  // The agent is instructed to commit, but if it didn't (LLM flakiness,
-  // confused output, etc.), we catch the changes here so they aren't lost
-  // when the ephemeral sandbox terminates.
-  log("Safety-net: staging any uncommitted changes...");
-  safeExec("git add -A", WORK_DIR);
-  const stagedFiles = safeExec("git diff --cached --name-only", WORK_DIR);
-  if (stagedFiles) {
-    safeExec(
-      `git commit -m "feat(${task.id}): auto-commit uncommitted changes"`,
-      WORK_DIR,
-    );
-    log(`Safety-net commit created (${stagedFiles.split("\n").length} files).`);
+  // ── Bug fix: Detect empty LLM responses ────────────────────────────────
+  // If the LLM returned zero tokens and the agent made zero tool calls,
+  // the worker produced no useful work. Mark as failed so the planner
+  // can re-plan instead of treating scaffold-only diffs as "complete".
+  const isEmptyResponse = tokensUsed === 0 && toolCallCount === 0;
+  if (isEmptyResponse) {
+    log("WARNING: LLM returned empty response (0 tokens, 0 tool calls). Marking task as failed.");
+  }
+
+  const gitignorePath = `${WORK_DIR}/.gitignore`;
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, GITIGNORE_ESSENTIALS + "\n", "utf-8");
+    log("Created .gitignore with artifact exclusions");
+  } else {
+    const existing = readFileSync(gitignorePath, "utf-8");
+    if (!existing.includes("node_modules")) {
+      appendFileSync(gitignorePath, "\n" + GITIGNORE_ESSENTIALS + "\n", "utf-8");
+      log("Appended artifact exclusions to existing .gitignore");
+    }
+  }
+
+  // ── Bug fix: Only safety-net commit if agent actually did work ─────────
+  // Without this guard, scaffold files (.gitignore, AGENTS.md) get committed
+  // even when the LLM did nothing, producing a false "successful" diff.
+  if (!isEmptyResponse) {
+    log("Safety-net: staging any uncommitted changes...");
+    safeExec("git add -A", WORK_DIR);
+    const stagedFiles = safeExec("git diff --cached --name-only", WORK_DIR);
+    if (stagedFiles) {
+      safeExec(
+        `git commit -m "feat(${task.id}): auto-commit uncommitted changes"`,
+        WORK_DIR,
+      );
+      log(`Safety-net commit created (${stagedFiles.split("\n").length} files).`);
+    }
+  } else {
+    log("Skipping safety-net commit — agent produced no work.");
   }
 
   log("Extracting git diff stats...");
-  const diff = safeExec(`git diff ${startSha} --no-color`, WORK_DIR);
+  const diff = safeExec(`git diff ${startSha} --no-color -- . ':!node_modules'`, WORK_DIR);
   const numstat = safeExec(`git diff ${startSha} --numstat`, WORK_DIR);
   const filesCreatedRaw = safeExec(`git diff ${startSha} --diff-filter=A --name-only`, WORK_DIR);
   const filesChangedRaw = safeExec(`git diff ${startSha} --name-only`, WORK_DIR);
 
-  const filesChanged = filesChangedRaw ? filesChangedRaw.split("\n").filter(Boolean) : [];
-  const filesCreated = filesCreatedRaw ? filesCreatedRaw.split("\n").filter(Boolean) : [];
+  const filesChangedAll = filesChangedRaw ? filesChangedRaw.split("\n").filter(Boolean) : [];
+  const filesCreatedAll = filesCreatedRaw ? filesCreatedRaw.split("\n").filter(Boolean) : [];
+
+  const filesChanged = filesChangedAll.filter((f) => !isArtifact(f));
+  const filesCreated = filesCreatedAll.filter((f) => !isArtifact(f));
 
   let linesAdded = 0;
   let linesRemoved = 0;
   if (numstat) {
     for (const line of numstat.split("\n")) {
       const parts = line.split("\t");
-      if (parts.length >= 2) {
+      if (parts.length >= 3) {
+        if (isArtifact(parts[2])) continue;
         const added = parseInt(parts[0], 10);
         const removed = parseInt(parts[1], 10);
         if (!isNaN(added)) linesAdded += added;
@@ -224,12 +309,18 @@ export async function runWorker(): Promise<void> {
 
   const handoff: Handoff = {
     taskId: task.id,
-    status: "complete",
-    summary: lastAssistantMessage || "Task completed (no final message captured).",
+    status: isEmptyResponse ? "failed" : "complete",
+    summary: isEmptyResponse
+      ? "Task failed: LLM returned empty response (0 tokens, 0 tool calls). Possible API/endpoint failure."
+      : (lastAssistantMessage || "Task completed (no final message captured)."),
     diff,
     filesChanged,
-    concerns: [],
-    suggestions: [],
+    concerns: isEmptyResponse
+      ? ["Empty LLM response — possible API failure or model endpoint issue"]
+      : [],
+    suggestions: isEmptyResponse
+      ? ["Check LLM endpoint connectivity", "Verify model is available in sandbox environment"]
+      : [],
     metrics: {
       linesAdded,
       linesRemoved,
@@ -240,6 +331,18 @@ export async function runWorker(): Promise<void> {
       durationMs: Date.now() - startTime,
     },
   };
+
+  workerSpan?.setAttributes({
+    toolCallCount,
+    tokensUsed,
+    filesChanged: filesChanged.length,
+    linesAdded,
+    linesRemoved,
+    durationMs: handoff.metrics.durationMs,
+  });
+  workerSpan?.setStatus("ok");
+  workerSpan?.end();
+  closeTracing();
 
   writeResult(handoff);
   log(`Done. Duration: ${handoff.metrics.durationMs}ms, Tools: ${toolCallCount}, Tokens: ${tokensUsed}`);
@@ -262,6 +365,7 @@ runWorker().catch((err: unknown) => {
   if (errorStack) {
     log(errorStack);
   }
+  closeTracing();
 
   const taskId = readTaskIdSafe();
   const failureHandoff: Handoff = {
