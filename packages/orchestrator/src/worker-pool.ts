@@ -6,14 +6,16 @@
  *
  * There is no persistent pool. `start()` and `stop()` are no-ops.
  * `assignTask()` spawns a Python subprocess that handles the full sandbox lifecycle.
+ *
+ * stdout from spawn_sandbox.py is streamed line-by-line so that intermediate
+ * worker logs (tool calls, progress, etc.) are re-emitted as NDJSON "Worker progress"
+ * events in real-time — visible in the dashboard while agents are running.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import type { Task, Handoff, HarnessConfig } from "@agentswarm/core";
 import { createLogger } from "@agentswarm/core";
-
-const execFileAsync = promisify(execFile);
 
 const logger = createLogger("worker-pool", "root-planner");
 
@@ -98,34 +100,7 @@ export class WorkerPool {
     });
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        this.config.pythonPath,
-        ["infra/spawn_sandbox.py", payload],
-        {
-          cwd: process.cwd(),
-          timeout: this.config.workerTimeout * 1000,
-          // Worker stdout includes streamed logs + final JSON handoff; large diffs can be several MB
-          maxBuffer: 50 * 1024 * 1024,
-        },
-      );
-
-      if (stderr) {
-        logger.warn("Sandbox stderr output", { taskId: task.id, stderr: stderr.slice(0, 500) });
-      }
-
-      // The last line of stdout is the JSON handoff result.
-      // Previous lines are streamed worker logs.
-      const lines = stdout.trim().split("\n");
-      const lastLine = lines[lines.length - 1];
-
-      let handoff: Handoff;
-      try {
-        handoff = JSON.parse(lastLine);
-      } catch {
-        throw new Error(
-          `Failed to parse sandbox output as Handoff JSON: ${lastLine.slice(0, 200)}`
-        );
-      }
+      const handoff = await this.runSandboxStreaming(task.id, payload);
 
       for (const cb of this.taskCompleteCallbacks) {
         cb(handoff);
@@ -145,6 +120,115 @@ export class WorkerPool {
       throw err;
     } finally {
       this.activeWorkers.delete(worker.id);
+    }
+  }
+
+  private runSandboxStreaming(taskId: string, payload: string): Promise<Handoff> {
+    return new Promise<Handoff>((resolve, reject) => {
+      const proc = spawn(
+        this.config.pythonPath,
+        ["-u", "infra/spawn_sandbox.py", payload],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, PYTHONUNBUFFERED: "1" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const stdoutLines: string[] = [];
+      const stderrChunks: string[] = [];
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        proc.kill("SIGKILL");
+        logger.error("Worker timed out", {
+          taskId,
+          timeoutSec: this.config.workerTimeout,
+        });
+        reject(
+          new Error(
+            `Sandbox timed out after ${this.config.workerTimeout}s for task ${taskId}`,
+          ),
+        );
+      }, this.config.workerTimeout * 1000);
+
+      const rl = createInterface({ input: proc.stdout! });
+
+      rl.on("line", (line: string) => {
+        stdoutLines.push(line);
+        this.forwardWorkerLine(taskId, line);
+      });
+
+      proc.stderr!.on("data", (chunk: Buffer) => {
+        stderrChunks.push(chunk.toString("utf-8"));
+      });
+
+      proc.on("close", (_code: number | null) => {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+
+        const stderr = stderrChunks.join("");
+        if (stderr) {
+          logger.warn("Sandbox stderr output", {
+            taskId,
+            stderr: stderr.slice(0, 500),
+          });
+        }
+
+        if (stdoutLines.length === 0) {
+          reject(new Error(`Sandbox produced no output for task ${taskId}`));
+          return;
+        }
+
+        const lastLine = stdoutLines[stdoutLines.length - 1];
+        try {
+          resolve(JSON.parse(lastLine) as Handoff);
+        } catch {
+          reject(
+            new Error(
+              `Failed to parse sandbox output as Handoff JSON: ${lastLine.slice(0, 200)}`,
+            ),
+          );
+        }
+      });
+
+      proc.on("error", (err: Error) => {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        reject(err);
+      });
+    });
+  }
+
+  private forwardWorkerLine(taskId: string, line: string): void {
+    if (line.startsWith("{")) return;
+
+    const spawnMatch = line.match(/^\[spawn\]\s*(.+)/);
+    if (spawnMatch) {
+      logger.info("Worker progress", {
+        taskId,
+        phase: "sandbox",
+        detail: spawnMatch[1],
+      });
+      return;
+    }
+
+    const workerMatch = line.match(/^\[worker:[^\]]*\]\s*(.+)/);
+    if (workerMatch) {
+      logger.info("Worker progress", {
+        taskId,
+        phase: "execution",
+        detail: workerMatch[1],
+      });
+      return;
+    }
+
+    if (line.trim()) {
+      logger.debug("Worker output", { taskId, line: line.slice(0, 200) });
     }
   }
 
