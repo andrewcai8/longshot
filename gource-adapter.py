@@ -14,6 +14,9 @@ import sys
 import json
 import time
 
+# Map taskId -> parentId to reconstruct full paths
+TASK_PARENTS = {}
+
 def get_color(msg):
     """Return hex color (no #) for event type."""
     msg = msg.lower()
@@ -27,6 +30,23 @@ def get_color(msg):
         return "AA00FF" # Purple
     return "FFFFFF" # White
 
+def build_path(task_id, role_group):
+    """Recursively build path walking up the parent tree."""
+    parts = []
+
+    # 1. Walk up to root
+    curr = task_id
+    while curr:
+        parts.insert(0, curr)
+        curr = TASK_PARENTS.get(curr)
+        # Safety break for loops or too deep
+        if len(parts) > 10:
+            break
+
+    # 2. Add role group prefix
+    # swarm / {role} / {grandparent} / {parent} / {task}
+    return f"swarm/{role_group}/{'/'.join(parts)}"
+
 def process_line(line):
     try:
         event = json.loads(line)
@@ -34,9 +54,6 @@ def process_line(line):
         return
 
     # 1. Timestamp (seconds)
-    # Use current time if we want "live" feel, or event time for accuracy.
-    # For Gource realtime mode, using event timestamp is usually best if it matches flow.
-    # event['timestamp'] is ms, convert to seconds.
     ts_ms = event.get("timestamp")
     if ts_ms:
         ts = int(ts_ms / 1000)
@@ -49,48 +66,43 @@ def process_line(line):
     # 2. Extract Entities
     task_id = str(data.get("taskId") or event.get("taskId") or "")
     agent_role = event.get("agentRole", "System")
+    role_group = f"{agent_role}s"
 
-    # 3. Determine User
+    # 3. Update Genealogy (Track Parents)
+    parent_id = data.get("parentId") or data.get("parentTaskId")
+    if task_id and parent_id:
+        TASK_PARENTS[task_id] = parent_id
+
+    # 4. Determine User
     user = agent_role
-    # If task_id looks like an agent ("agent-coder-1"), treat it as the user
     if task_id.startswith("agent-"):
-        user = task_id.split("-sub-")[0] # clean up sub-task IDs from agent names
+        user = task_id.split("-sub-")[0]
 
     if not user or user == "System":
         user = "Orchestrator"
 
-    # 4. Determine File Path
-    # Group by Agent Role to create distinct clusters ("lobes") in the graph
-    # swarm / {role} / {parent} / {task}
-
-    role_group = f"{agent_role}s" # e.g. "workers", "subplanners"
-
-    parent_id = data.get("parentId") or data.get("parentTaskId")
-    if parent_id:
-        path = f"swarm/{role_group}/{parent_id}/{task_id}"
-    elif task_id:
-        path = f"swarm/{role_group}/{task_id}"
+    # 5. Determine File Path (Full Ancestry)
+    if task_id:
+        path = build_path(task_id, role_group)
     else:
         path = f"swarm/{role_group}/orchestrator_log"
 
-    # 5. Determine Action (A, M, D)
+    # 6. Determine Action
     action = "M"
     if msg == "Task created" or msg == "Worker dispatched" or "spawned" in msg:
         action = "A"
 
-    # 6. Color
+    # 7. Color
     color = get_color(msg)
 
-    # Sanitize for pipe format (remove pipes)
+    # Sanitize
     user = str(user).replace("|", "")
     path = str(path).replace("|", "")
 
-    # Output: timestamp|username|type|file|color
     print(f"{ts}|{user}|{action}|{path}|{color}")
     sys.stdout.flush()
 
 def main():
-    # Read from stdin
     try:
         for line in sys.stdin:
             if not line: break
