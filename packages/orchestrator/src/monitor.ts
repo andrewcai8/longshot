@@ -24,6 +24,12 @@ export class Monitor {
   private mergeSuccesses: number;
   private suspiciousTaskCount: number;
   private startTime: number;
+  private finalizationMetrics: {
+    attempts: number;
+    buildPassed: boolean;
+    testsPassed: boolean;
+    durationMs: number;
+  } | null = null;
 
   private onTimeoutCallbacks: ((workerId: string, taskId: string) => void)[];
   private onEmptyDiffCallbacks: ((workerId: string, taskId: string) => void)[];
@@ -116,7 +122,7 @@ export class Monitor {
     const activeToolCalls = this.workerPool.getTotalActiveToolCalls();
     const ESTIMATED_TOKENS_PER_TOOL_CALL = 3000;
 
-    return {
+    const snapshot: MetricsSnapshot = {
       timestamp: Date.now(),
       activeWorkers: this.workerPool.getActiveTaskCount(),
       pendingTasks: this.taskQueue.getPendingCount(),
@@ -131,6 +137,15 @@ export class Monitor {
       activeToolCalls,
       estimatedInFlightTokens: activeToolCalls * ESTIMATED_TOKENS_PER_TOOL_CALL,
     };
+
+    if (this.finalizationMetrics) {
+      snapshot.finalizationAttempts = this.finalizationMetrics.attempts;
+      snapshot.finalizationBuildPassed = this.finalizationMetrics.buildPassed;
+      snapshot.finalizationTestsPassed = this.finalizationMetrics.testsPassed;
+      snapshot.finalizationDurationMs = this.finalizationMetrics.durationMs;
+    }
+
+    return snapshot;
   }
 
   recordTokenUsage(tokens: number): void {
@@ -157,6 +172,16 @@ export class Monitor {
   recordSuspiciousTask(taskId: string, reason: string): void {
     this.suspiciousTaskCount++;
     logger.warn("Suspicious task detected", { taskId, reason, totalSuspicious: this.suspiciousTaskCount });
+  }
+
+  setFinalizationMetrics(metrics: {
+    attempts: number;
+    buildPassed: boolean;
+    testsPassed: boolean;
+    durationMs: number;
+  }): void {
+    this.finalizationMetrics = metrics;
+    logger.info("Finalization metrics recorded", metrics);
   }
 
   onWorkerTimeout(callback: (workerId: string, taskId: string) => void): void {

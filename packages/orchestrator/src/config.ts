@@ -1,11 +1,18 @@
 import type { HarnessConfig, LLMEndpoint } from "@agentswarm/core";
 
+export interface FinalizationConfig {
+  maxAttempts: number;
+  enabled: boolean;
+  sweepTimeoutMs: number;
+}
+
 export interface OrchestratorConfig extends HarnessConfig {
   targetRepoPath: string;
   pythonPath: string;
   healthCheckInterval: number;
   /** Max ms to wait for LLM endpoints to become ready at startup. 0 = skip probe. */
   readinessTimeoutMs: number;
+  finalization: FinalizationConfig;
 }
 
 /** Named type for the LLM configuration block (extracted from HarnessConfig). */
@@ -102,6 +109,11 @@ export function loadConfig(): OrchestratorConfig {
     readinessTimeoutMs: process.env.LLM_READINESS_TIMEOUT_MS
       ? Number(process.env.LLM_READINESS_TIMEOUT_MS)
       : 120_000,
+    finalization: {
+      maxAttempts: Number(process.env.FINALIZATION_MAX_ATTEMPTS) || 3,
+      enabled: process.env.FINALIZATION_ENABLED !== "false",
+      sweepTimeoutMs: Number(process.env.FINALIZATION_SWEEP_TIMEOUT_MS) || 120_000,
+    },
   };
 
   return cachedConfig;
