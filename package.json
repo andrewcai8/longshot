@@ -6,11 +6,7 @@
   "scripts": {
     "build": "turbo run build",
     "clean": "turbo run clean",
-    "typecheck": "turbo run typecheck",
-    "poke:dev": "npx tsx poke/server.ts",
-    "poke:tunnel": "npx poke tunnel http://localhost:8787/mcp --name \"AgentSwarm\"",
-    "poke:ngrok": "ngrok http 8787",
-    "poke:wrap": "npx poke"
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -19,8 +15,8 @@
   },
   "packageManager": "pnpm@9.0.0",
   "dependencies": {
+    "@agentswarm/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "poke": "^0.2.5",
     "zod": "^4.3.6"
   }
 }
