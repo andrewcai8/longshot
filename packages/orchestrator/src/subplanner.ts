@@ -171,6 +171,7 @@ export class Subplanner {
       model: config.llm.model,
       maxTokens: config.llm.maxTokens,
       temperature: config.llm.temperature,
+      timeoutMs: config.llm.timeoutMs,
     });
 
     this.subtaskCreatedCallbacks = [];

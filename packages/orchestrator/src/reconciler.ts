@@ -94,6 +94,7 @@ export class Reconciler {
       model: config.llm.model,
       maxTokens: config.llm.maxTokens,
       temperature: config.llm.temperature,
+      timeoutMs: config.llm.timeoutMs,
     });
 
     this.sweepCompleteCallbacks = [];
@@ -158,9 +159,16 @@ export class Reconciler {
     const testOutput = testResult.stdout + testResult.stderr;
     const testsOk = testResult.code === 0 && !testResult.stderr?.includes("FAIL");
 
-    logger.info("Sweep check results", { buildOk, testsOk });
+    const conflictResult = await runCommand(
+      "grep", ["-rl", "<<<<<<<", "--include=*.ts", "--include=*.tsx", "--include=*.js", "--include=*.json", "."],
+      this.targetRepoPath,
+    );
+    const conflictFiles = conflictResult.stdout.trim().split("\n").filter(Boolean);
+    const hasConflictMarkers = conflictFiles.length > 0;
 
-    if (buildOk && testsOk) {
+    logger.info("Sweep check results", { buildOk, testsOk, hasConflictMarkers, conflictFileCount: conflictFiles.length });
+
+    if (buildOk && testsOk && !hasConflictMarkers) {
       logger.info("All green — no fix tasks needed");
       return [];
     }
@@ -169,6 +177,14 @@ export class Reconciler {
     const recentCommits = gitResult.stdout.trim();
 
     let userMessage = "";
+
+    if (hasConflictMarkers) {
+      userMessage += `## Merge Conflict Markers Found\nFiles with unresolved conflict markers (<<<<<<< / ======= / >>>>>>>):\n`;
+      for (const f of conflictFiles.slice(0, 20)) {
+        userMessage += `- ${f}\n`;
+      }
+      userMessage += `\n`;
+    }
 
     if (!buildOk) {
       userMessage += `## Build Output (tsc --noEmit)\n\`\`\`\n${buildOutput.slice(0, 8000)}\n\`\`\`\n\n`;
