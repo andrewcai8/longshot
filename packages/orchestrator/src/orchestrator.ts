@@ -5,17 +5,16 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Task, Handoff, MetricsSnapshot } from "@agentswarm/core";
-import { createLogger } from "@agentswarm/core";
+import { createLogger, createTracer, type Tracer } from "@agentswarm/core";
 import { loadConfig, type OrchestratorConfig } from "./config.js";
 import { TaskQueue } from "./task-queue.js";
 import { WorkerPool } from "./worker-pool.js";
 import { MergeQueue } from "./merge-queue.js";
-import { GitMutex } from "./shared.js";
+import { GitMutex, slugifyForBranch } from "./shared.js";
 import { Monitor } from "./monitor.js";
 import { Planner } from "./planner.js";
 import { Reconciler } from "./reconciler.js";
-import { createPokeNotifier } from "../../../poke/notifier.js";
-import { PokeStateWriter } from "../../../poke/state-writer.js";
+import { Subplanner, DEFAULT_SUBPLANNER_CONFIG } from "./subplanner.js";
 
 const logger = createLogger("orchestrator", "root-planner");
 
@@ -39,12 +38,14 @@ export interface OrchestratorCallbacks {
 export interface Orchestrator {
   /** Underlying components — exposed for advanced use cases. */
   planner: Planner;
+  subplanner: Subplanner;
   reconciler: Reconciler;
   monitor: Monitor;
   workerPool: WorkerPool;
   taskQueue: TaskQueue;
   mergeQueue: MergeQueue;
   config: OrchestratorConfig;
+  tracer: Tracer;
 
   /** Start background services (worker pool, monitor, reconciler). */
   start(): Promise<void>;
@@ -113,6 +114,19 @@ export async function createOrchestrator(
     maxWorkers: config.maxWorkers,
     targetRepo: config.targetRepoPath,
   });
+  logger.debug("Full config", {
+    maxWorkers: config.maxWorkers,
+    workerTimeout: config.workerTimeout,
+    mergeStrategy: config.mergeStrategy,
+    model: config.llm.model,
+    maxTokens: config.llm.maxTokens,
+    temperature: config.llm.temperature,
+    endpoints: config.llm.endpoints.map(e => ({ name: e.name, endpoint: e.endpoint, weight: e.weight })),
+    repoUrl: config.git.repoUrl,
+    mainBranch: config.git.mainBranch,
+    branchPrefix: config.git.branchPrefix,
+    targetRepoPath: config.targetRepoPath,
+  });
 
   // --- Prompts ---
   const readPrompt = async (name: string): Promise<string> => {
@@ -120,11 +134,18 @@ export async function createOrchestrator(
     return readFile(promptPath, "utf-8");
   };
 
-  const [rootPrompt, workerPrompt, reconcilerPrompt] = await Promise.all([
+  const [rootPrompt, workerPrompt, reconcilerPrompt, subplannerPrompt] = await Promise.all([
     readPrompt("root-planner"),
     readPrompt("worker"),
     readPrompt("reconciler"),
+    readPrompt("subplanner"),
   ]);
+  logger.debug("Prompts loaded", {
+    rootPromptSize: rootPrompt.length,
+    workerPromptSize: workerPrompt.length,
+    reconcilerPromptSize: reconcilerPrompt.length,
+    subplannerPromptSize: subplannerPrompt.length,
+  });
 
   // --- Components ---
   const taskQueue = new TaskQueue();
@@ -158,6 +179,16 @@ export async function createOrchestrator(
     taskQueue,
   );
 
+  const subplanner = new Subplanner(
+    config,
+    DEFAULT_SUBPLANNER_CONFIG,
+    taskQueue,
+    workerPool,
+    mergeQueue,
+    monitor,
+    subplannerPrompt,
+  );
+
   const planner = new Planner(
     config,
     { maxIterations: options.maxIterations ?? 100 },
@@ -166,6 +197,7 @@ export async function createOrchestrator(
     mergeQueue,
     monitor,
     rootPrompt,
+    subplanner,
   );
 
   const reconciler = new Reconciler(
@@ -178,6 +210,14 @@ export async function createOrchestrator(
     monitor,
     reconcilerPrompt,
   );
+
+  // --- Tracer ---
+  const tracer = createTracer();
+  planner.setTracer(tracer);
+  workerPool.setTracer(tracer);
+  mergeQueue.setTracer(tracer);
+  reconciler.setTracer(tracer);
+  subplanner.setTracer(tracer);
 
   // --- Wire callbacks ---
   const cb = options.callbacks;
@@ -192,31 +232,19 @@ export async function createOrchestrator(
   if (cb?.onMetricsUpdate) monitor.onMetricsUpdate(cb.onMetricsUpdate);
   if (cb?.onTaskStatusChange) taskQueue.onStatusChange(cb.onTaskStatusChange);
 
-  // --- Poke state writer (writes metrics/tasks to disk for MCP server) ---
-  const stateWriter = new PokeStateWriter();
-  monitor.onMetricsUpdate((snap) => stateWriter.writeMetrics(snap));
-  taskQueue.onStatusChange(() => stateWriter.writeTasks(taskQueue.getAll()));
-
-  // --- Poke notifications (opt-in via POKE_NOTIFICATIONS=true) ---
-  const pokeNotifier = createPokeNotifier();
-  monitor.onWorkerTimeout((wid, tid) => pokeNotifier.onWorkerTimeout(wid, tid));
-  monitor.onEmptyDiff((wid, tid) => pokeNotifier.onEmptyDiff(wid, tid));
-  monitor.onMetricsUpdate((snap) => pokeNotifier.onMetricsUpdate(snap));
-  reconciler.onSweepComplete((tasks) => pokeNotifier.onSweepComplete(tasks));
-  reconciler.onError((err) => pokeNotifier.onError(err));
-  planner.onError((err) => pokeNotifier.onError(err));
-
   // --- Instance ---
   let started = false;
 
   const instance: Orchestrator = {
     planner,
+    subplanner,
     reconciler,
     monitor,
     workerPool,
     taskQueue,
     mergeQueue,
     config,
+    tracer,
 
     async start() {
       if (started) return;
@@ -224,18 +252,56 @@ export async function createOrchestrator(
       await workerPool.start();
       monitor.start();
       reconciler.start();
+
+      reconciler.onSweepComplete((tasks) => {
+        for (const task of tasks) {
+          planner.injectTask(task);
+        }
+      });
+
+      logger.debug("All components started", {
+        monitorInterval: config.healthCheckInterval,
+        workerTimeout: config.workerTimeout,
+        mergeStrategy: config.mergeStrategy,
+        maxWorkers: config.maxWorkers,
+      });
+
       mergeQueue.startBackground();
       mergeQueue.onMergeResult((result) => {
         monitor.recordMergeAttempt(result.success);
-        logger.info("Background merge result", {
+        logger.info("Merge result", {
           branch: result.branch,
           status: result.status,
           success: result.success,
         });
+        logger.debug("Merge result details", {
+          branch: result.branch,
+          status: result.status,
+          success: result.success,
+          message: result.message,
+          conflicts: result.conflicts,
+        });
       });
 
       let conflictCounter = 0;
+      const MAX_CONFLICT_FIX_TASKS = 10;
+
       mergeQueue.onConflict((info) => {
+        if (info.branch.includes("conflict-fix")) {
+          logger.warn("Skipping conflict-fix for conflict-fix branch (cascade prevention)", {
+            branch: info.branch,
+          });
+          return;
+        }
+
+        if (conflictCounter >= MAX_CONFLICT_FIX_TASKS) {
+          logger.warn("Conflict-fix budget exhausted, skipping", {
+            branch: info.branch,
+            limit: MAX_CONFLICT_FIX_TASKS,
+          });
+          return;
+        }
+
         conflictCounter++;
         const fixId = `conflict-fix-${String(conflictCounter).padStart(3, "0")}`;
         const fixTask: Task = {
@@ -245,7 +311,7 @@ export async function createOrchestrator(
             `Remove all conflict markers. Ensure the file compiles after resolution.`,
           scope: info.conflictingFiles.slice(0, 5),
           acceptance: `No <<<<<<< markers remain in the affected files. tsc --noEmit returns 0 for these files.`,
-          branch: `${config.git.branchPrefix}${fixId}`,
+          branch: `${config.git.branchPrefix}${fixId}-${slugifyForBranch(`resolve merge conflict ${info.branch}`)}`,
           status: "pending",
           createdAt: Date.now(),
           priority: 1,
@@ -255,6 +321,7 @@ export async function createOrchestrator(
           fixId,
           branch: info.branch,
           conflictingFiles: info.conflictingFiles,
+          remainingBudget: MAX_CONFLICT_FIX_TASKS - conflictCounter,
         });
 
         planner.injectTask(fixTask);

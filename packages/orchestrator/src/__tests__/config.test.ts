@@ -40,7 +40,7 @@ describe("config", () => {
       // Verify defaults
       assert.strictEqual(config.maxWorkers, 50);
       assert.strictEqual(config.workerTimeout, 1800);
-      assert.strictEqual(config.mergeStrategy, "fast-forward");
+      assert.strictEqual(config.mergeStrategy, "rebase");
       assert.strictEqual(config.llm.model, "glm-5");
       assert.strictEqual(config.llm.maxTokens, 65536);
       assert.strictEqual(config.llm.temperature, 0.7);

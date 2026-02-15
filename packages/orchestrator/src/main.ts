@@ -1,26 +1,79 @@
 import { config as loadDotenv } from "dotenv";
 import { resolve } from "node:path";
-import { createLogger, enableFileLogging, closeFileLogging } from "@agentswarm/core";
+import { createLogger, enableFileLogging, closeFileLogging, enableTracing, closeTracing, setLogLevel, getLogLevel } from "@agentswarm/core";
 import { createOrchestrator } from "./orchestrator.js";
 
 loadDotenv({ path: resolve(process.cwd(), ".env") });
 
+// Re-resolve log level after dotenv loads (env var may come from .env file)
+if (process.env.LOG_LEVEL) {
+  const level = process.env.LOG_LEVEL.toLowerCase().trim();
+  if (level === "debug" || level === "info" || level === "warn" || level === "error") {
+    setLogLevel(level);
+  }
+}
+
 const logger = createLogger("main", "root-planner");
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
 
 async function main(): Promise<void> {
   const logFile = enableFileLogging(process.cwd());
-  logger.info("Log file", { path: logFile });
+  const { traceFile, llmDetailFile } = enableTracing(process.cwd());
+
+  logger.info("Run files", { logFile, traceFile, llmDetailFile });
+  logger.info("Log level", { stdout: getLogLevel(), file: "debug" });
 
   const orchestrator = await createOrchestrator({
     callbacks: {
       onTaskCreated(task) {
         logger.info("Task created", {
           taskId: task.id,
-          desc: task.description.slice(0, 80),
+          parentId: task.parentId,
+          desc: task.description.slice(0, 200),
         });
       },
       onTaskCompleted(task, handoff) {
-        logger.info("Task completed", { taskId: task.id, status: handoff.status });
+        const duration = formatDuration(handoff.metrics.durationMs);
+        const filesChanged = handoff.filesChanged.length;
+
+        logger.info("Task completed", {
+          taskId: task.id,
+          parentId: task.parentId,
+          status: handoff.status,
+          duration,
+          summary: handoff.summary.slice(0, 250),
+          filesChanged,
+          linesAdded: handoff.metrics.linesAdded,
+          linesRemoved: handoff.metrics.linesRemoved,
+          filesCreated: handoff.metrics.filesCreated,
+          filesModified: handoff.metrics.filesModified,
+          tokensUsed: handoff.metrics.tokensUsed,
+          toolCallCount: handoff.metrics.toolCallCount,
+          durationMs: handoff.metrics.durationMs,
+        });
+
+        // Anomaly warnings for suspiciously large outputs
+        if (filesChanged > 100) {
+          logger.warn("Anomaly: task changed unusually many files", {
+            taskId: task.id,
+            filesChanged,
+            hint: "Worker may have committed node_modules or generated files",
+          });
+        }
+        if (handoff.metrics.linesAdded > 50_000) {
+          logger.warn("Anomaly: task added unusually many lines", {
+            taskId: task.id,
+            linesAdded: handoff.metrics.linesAdded,
+            hint: "Worker may have committed vendored/generated content",
+          });
+        }
       },
       onIterationComplete(iteration, tasks, handoffs) {
         const snapshot = orchestrator.getSnapshot();
@@ -32,11 +85,22 @@ async function main(): Promise<void> {
         });
       },
       onError(error) {
-        logger.error("Planner error", { error: error.message });
+        // Enrich planner errors with orchestrator context
+        const snapshot = orchestrator.getSnapshot();
+        logger.error("Planner error", {
+          error: error.message,
+          activeWorkers: snapshot.activeWorkers,
+          pendingTasks: snapshot.pendingTasks,
+          completedTasks: snapshot.completedTasks,
+          failedTasks: snapshot.failedTasks,
+        });
       },
       onSweepComplete(tasks) {
         if (tasks.length > 0) {
-          logger.info("Reconciler created fix tasks", { count: tasks.length });
+          logger.info("Reconciler created fix tasks", {
+            count: tasks.length,
+            taskIds: tasks.map((t) => t.id),
+          });
         }
       },
       onReconcilerError(error) {
@@ -49,18 +113,49 @@ async function main(): Promise<void> {
         logger.warn("Empty diff from worker", { workerId, taskId });
       },
       onMetricsUpdate(snapshot) {
-        logger.info("Metrics", { ...snapshot });
+        // Include merge stats from the merge queue
+        const mergeStats = orchestrator.mergeQueue.getMergeStats();
+        logger.info("Metrics", {
+          ...snapshot,
+          mergeQueueDepth: orchestrator.mergeQueue.getQueueLength(),
+          totalMerged: mergeStats.totalMerged,
+          totalMergeFailed: mergeStats.totalFailed,
+          totalConflicts: mergeStats.totalConflicts,
+        });
       },
       onTaskStatusChange(task, oldStatus, newStatus) {
+        // Skip pending→assigned — redundant with "Dispatching task to ephemeral sandbox"
+        // event which carries richer context.  All other transitions are forwarded so the
+        // dashboard can track the full task lifecycle (notably assigned→running for live
+        // execution progress, timers, and active-worker counts).
+        if (oldStatus === "pending" && newStatus === "assigned") return;
+
         logger.info("Task status", {
           taskId: task.id,
+          parentId: task.parentId,
           from: oldStatus,
           to: newStatus,
-          desc: task.description.slice(0, 80),
+          desc: task.description.slice(0, 200),
         });
       },
     },
   });
+
+  /** Log the final run summary and close file handles. */
+  function finalize(snapshot: ReturnType<typeof orchestrator.getSnapshot>): void {
+    const mergeStats = orchestrator.mergeQueue.getMergeStats();
+    logger.info("Final summary", {
+      ...snapshot,
+      totalMerged: mergeStats.totalMerged,
+      totalMergeFailed: mergeStats.totalFailed,
+      totalConflicts: mergeStats.totalConflicts,
+      logFile,
+      traceFile,
+      llmDetailFile,
+    });
+    closeTracing();
+    closeFileLogging();
+  }
 
   let shuttingDown = false;
 
@@ -69,9 +164,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info("Shutting down...");
     await orchestrator.stop();
-    const snapshot = orchestrator.getSnapshot();
-    logger.info("Final metrics", { ...snapshot });
-    closeFileLogging();
+    finalize(orchestrator.getSnapshot());
     process.exit(0);
   };
 
@@ -88,8 +181,7 @@ async function main(): Promise<void> {
     process.argv[2] || "Build Minecraft according to SPEC.md and FEATURES.json in the target repository.";
   const finalSnapshot = await orchestrator.run(request);
 
-  logger.info("Planner loop complete", { ...finalSnapshot });
-  closeFileLogging();
+  finalize(finalSnapshot);
 }
 
 main().catch((error) => {
