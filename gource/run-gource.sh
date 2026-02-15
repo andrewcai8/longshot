@@ -44,7 +44,7 @@ ARGS=(
     --font-colour 888888
     --seconds-per-day 1.5
     --auto-skip-seconds 0.1
-    --file-idle-time 8
+    --file-idle-time 0
     --max-file-lag 0.05
     --elasticity 0.03
     --bloom-multiplier 0.8
@@ -106,11 +106,16 @@ case "$MODE" in
         ;;
 
     *)
-        if [[ ! -f "$DIR/packages/orchestrator/dist/main.js" ]]; then
-            echo "Orchestrator not built. Run: pnpm build"; exit 1
+        # Live Orchestrator Mode (Relative to parent dir)
+        PROJECT_ROOT="$DIR/.."
+        ORCHESTRATOR_DIST="$PROJECT_ROOT/packages/orchestrator/dist/main.js"
+
+        if [[ ! -f "$ORCHESTRATOR_DIST" ]]; then
+            echo "Orchestrator not built. Run: pnpm build"
+            exit 1
         fi
         echo "Running orchestrator → Gource..."
-        node "$DIR/packages/orchestrator/dist/main.js" "$@" \
+        node "$ORCHESTRATOR_DIST" "$@" \
             | python "$DIR/gource-adapter.py" > "$DIR/.gource-live.log" &
         PID=$!; sleep 3
         "$GOURCE" "${ARGS[@]}" --realtime "$DIR/.gource-live.log" || true

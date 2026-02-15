@@ -301,7 +301,8 @@ def run_demo(max_agents: int, total_features: int, save_path: str | None):
                 status = "complete" if ok else "failed"
                 c = STATUS_COLOURS[status]
                 owner = owners.get(tid, random.choice(WORKERS))
-                emit(sim_ts, owner, "D", paths[tid], c)
+                # Use "M" (modify) instead of "D" (delete) so files stay visible
+                emit(sim_ts, owner, "M", paths[tid], c)
                 if ok:
                     done += 1
                 else:
