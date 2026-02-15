@@ -1,9 +1,16 @@
-import { createLogger } from "@agentswarm/core";
+import { config as loadDotenv } from "dotenv";
+import { resolve } from "node:path";
+import { createLogger, enableFileLogging, closeFileLogging } from "@agentswarm/core";
 import { createOrchestrator } from "./orchestrator.js";
+
+loadDotenv({ path: resolve(process.cwd(), ".env") });
 
 const logger = createLogger("main", "root-planner");
 
 async function main(): Promise<void> {
+  const logFile = enableFileLogging(process.cwd());
+  logger.info("Log file", { path: logFile });
+
   const orchestrator = await createOrchestrator({
     callbacks: {
       onTaskCreated(task) {
@@ -64,6 +71,7 @@ async function main(): Promise<void> {
     await orchestrator.stop();
     const snapshot = orchestrator.getSnapshot();
     logger.info("Final metrics", { ...snapshot });
+    closeFileLogging();
     process.exit(0);
   };
 
@@ -77,10 +85,11 @@ async function main(): Promise<void> {
   logger.info("Orchestrator started — beginning planner loop");
 
   const request =
-    "Build VoxelCraft according to SPEC.md and FEATURES.json in the target repository.";
+    process.argv[2] || "Build Minecraft according to SPEC.md and FEATURES.json in the target repository.";
   const finalSnapshot = await orchestrator.run(request);
 
   logger.info("Planner loop complete", { ...finalSnapshot });
+  closeFileLogging();
 }
 
 main().catch((error) => {
