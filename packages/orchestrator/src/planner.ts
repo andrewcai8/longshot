@@ -1,12 +1,14 @@
 import type { Task, Handoff } from "@agentswarm/core";
 import { createLogger } from "@agentswarm/core";
+import type { Tracer, Span } from "@agentswarm/core";
 import type { OrchestratorConfig } from "./config.js";
 import type { TaskQueue } from "./task-queue.js";
 import type { WorkerPool } from "./worker-pool.js";
 import type { MergeQueue } from "./merge-queue.js";
 import type { Monitor } from "./monitor.js";
-import { LLMClient, type LLMMessage } from "./llm-client.js";
-import { type RepoState, type RawTaskInput, readRepoState, parseLLMTaskArray, ConcurrencyLimiter } from "./shared.js";
+import { Subplanner, shouldDecompose, DEFAULT_SUBPLANNER_CONFIG } from "./subplanner.js";
+import { createPlannerPiSession, cleanupPiSession, type PiSessionResult } from "./shared.js";
+import { type RepoState, type RawTaskInput, readRepoState, parseLLMTaskArray, ConcurrencyLimiter, slugifyForBranch } from "./shared.js";
 
 const logger = createLogger("planner", "root-planner");
 
@@ -24,14 +26,8 @@ const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_MAX_MS = 30_000;
 const MAX_CONSECUTIVE_ERRORS = 10;
 
-/**
- * Context management constants.
- * ~100K tokens ≈ 400K chars. Leave headroom for the LLM response.
- */
-const CONTEXT_CHAR_LIMIT = 400_000;
-
-/** Keep the last N messages intact when compacting (3 user+assistant exchanges). */
-const RECENT_MESSAGES_TO_KEEP = 6;
+const MAX_FILES_PER_HANDOFF = 30;
+const MAX_HANDOFF_SUMMARY_CHARS = 300;
 
 export interface PlannerConfig {
   maxIterations: number;
@@ -40,13 +36,15 @@ export interface PlannerConfig {
 export class Planner {
   private config: OrchestratorConfig;
   private plannerConfig: PlannerConfig;
-  private llmClient: LLMClient;
+  private piSession: PiSessionResult | null = null;
+  private lastTotalTokens: number = 0;
   private taskQueue: TaskQueue;
   private workerPool: WorkerPool;
   private mergeQueue: MergeQueue;
   private monitor: Monitor;
   private systemPrompt: string;
   private targetRepoPath: string;
+  private subplanner: Subplanner | null;
 
   private running: boolean;
   private taskCounter: number;
@@ -56,12 +54,13 @@ export class Planner {
   private allHandoffs: Handoff[];
   private handoffsSinceLastPlan: Handoff[];
   private activeTasks: Set<string>;
-
-  /** Persistent conversation history — the core of the continuous planner. */
-  private conversationHistory: LLMMessage[];
+  private dispatchedTaskIds: Set<string>;
 
   /** Scratchpad: rewritten (not appended) each iteration by the planner LLM. */
   private scratchpad: string;
+
+  private tracer: Tracer | null = null;
+  private rootSpan: Span | null = null;
 
   private taskCreatedCallbacks: ((task: Task) => void)[];
   private taskCompletedCallbacks: ((task: Task, handoff: Handoff) => void)[];
@@ -76,6 +75,7 @@ export class Planner {
     mergeQueue: MergeQueue,
     monitor: Monitor,
     systemPrompt: string,
+    subplanner?: Subplanner,
   ) {
     this.config = config;
     this.plannerConfig = plannerConfig;
@@ -85,6 +85,7 @@ export class Planner {
     this.monitor = monitor;
     this.systemPrompt = systemPrompt;
     this.targetRepoPath = config.targetRepoPath;
+    this.subplanner = subplanner ?? null;
 
     this.running = false;
     this.taskCounter = 0;
@@ -94,22 +95,43 @@ export class Planner {
     this.allHandoffs = [];
     this.handoffsSinceLastPlan = [];
     this.activeTasks = new Set();
+    this.dispatchedTaskIds = new Set();
 
-    this.conversationHistory = [];
     this.scratchpad = "";
-
-    this.llmClient = new LLMClient({
-      endpoints: config.llm.endpoints,
-      model: config.llm.model,
-      maxTokens: config.llm.maxTokens,
-      temperature: config.llm.temperature,
-      timeoutMs: config.llm.timeoutMs,
-    });
 
     this.taskCreatedCallbacks = [];
     this.taskCompletedCallbacks = [];
     this.iterationCompleteCallbacks = [];
     this.errorCallbacks = [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tracing
+  // ---------------------------------------------------------------------------
+
+  setTracer(tracer: Tracer): void {
+    this.tracer = tracer;
+  }
+
+  private async initSession(): Promise<void> {
+    if (this.piSession) return;
+
+    logger.info("Initializing Pi agent session for planner");
+    this.piSession = await createPlannerPiSession({
+      systemPrompt: this.systemPrompt,
+      targetRepoPath: this.targetRepoPath,
+      llmConfig: this.config.llm,
+    });
+    this.lastTotalTokens = 0;
+    logger.info("Pi agent session ready");
+  }
+
+  private disposeSession(): void {
+    if (this.piSession) {
+      cleanupPiSession(this.piSession.session, this.piSession.tempDir);
+      this.piSession = null;
+      logger.info("Pi agent session disposed");
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -120,11 +142,9 @@ export class Planner {
     this.running = true;
     logger.info("Starting streaming planner loop", { request: request.slice(0, 200) });
 
-    if (this.config.readinessTimeoutMs > 0) {
-      await this.llmClient.waitForReady({
-        maxWaitMs: this.config.readinessTimeoutMs,
-        pollIntervalMs: 5_000,
-      });
+    if (this.tracer) {
+      this.rootSpan = this.tracer.startSpan("planner.runLoop", { agentId: "planner" });
+      this.rootSpan.setAttribute("request", request.slice(0, 200));
     }
 
     let iteration = 0;
@@ -132,6 +152,7 @@ export class Planner {
     let consecutiveErrors = 0;
 
     while (this.running && iteration < this.plannerConfig.maxIterations) {
+      logger.debug("Loop tick", { iteration, activeTasks: this.activeTasks.size, pendingHandoffs: this.pendingHandoffs.length, handoffsSinceLastPlan: this.handoffsSinceLastPlan.length, planningDone });
       try {
         this.collectCompletedHandoffs();
 
@@ -144,7 +165,7 @@ export class Planner {
           logger.info(`Planning iteration ${iteration + 1}`, {
             activeWorkers: this.dispatchLimiter.getActive(),
             handoffsSinceLastPlan: this.handoffsSinceLastPlan.length,
-            conversationLength: this.conversationHistory.length,
+            hasPiSession: this.piSession !== null,
           });
 
           const repoState = await this.readRepoState();
@@ -156,7 +177,7 @@ export class Planner {
           consecutiveErrors = 0;
           this.handoffsSinceLastPlan = [];
 
-          if (tasks.length === 0 && this.activeTasks.size === 0) {
+          if (tasks.length === 0 && this.activeTasks.size === 0 && this.taskQueue.getPendingCount() === 0) {
             logger.info("No more tasks to create and no active work. Planning complete.");
             planningDone = true;
           } else if (tasks.length > 0) {
@@ -169,7 +190,7 @@ export class Planner {
           }
         }
 
-        if (planningDone && this.activeTasks.size === 0) {
+        if (planningDone && this.activeTasks.size === 0 && this.taskQueue.getPendingCount() === 0) {
           break;
         }
 
@@ -186,6 +207,9 @@ export class Planner {
         logger.error(`Planning failed (attempt ${consecutiveErrors}), retrying in ${(backoffMs / 1000).toFixed(0)}s`, {
           error: err.message,
           consecutiveErrors,
+          iteration: iteration + 1,
+          activeTasks: this.activeTasks.size,
+          hasPiSession: this.piSession !== null,
         });
 
         for (const cb of this.errorCallbacks) {
@@ -209,12 +233,17 @@ export class Planner {
       }
     }
 
+    this.disposeSession();
     this.running = false;
     logger.info("Planner loop finished", { iterations: iteration, totalHandoffs: this.allHandoffs.length });
+
+    this.rootSpan?.setStatus("ok");
+    this.rootSpan?.end();
   }
 
   stop(): void {
     this.running = false;
+    this.disposeSession();
     logger.info("Planner stop requested");
   }
 
@@ -230,83 +259,51 @@ export class Planner {
     return readRepoState(this.targetRepoPath);
   }
 
-  /**
-   * Continuous conversation planner.
-   *
-   * First call:  system prompt + initial request + repo state → stored in history.
-   * Subsequent:  incremental handoffs + fresh repo state appended as follow-up message.
-   *
-   * The LLM returns a JSON object: { scratchpad: string, tasks: Task[] }.
-   * Scratchpad is rewritten each call — never appended.
-   */
   async plan(request: string, repoState: RepoState, newHandoffs: Handoff[]): Promise<Task[]> {
-    const isFirstPlan = this.conversationHistory.length === 0;
-    const historySnapshot = [...this.conversationHistory];
-
-    if (isFirstPlan) {
-      const userMessage = this.buildInitialMessage(request, repoState);
-      this.conversationHistory = [
-        { role: "system", content: this.systemPrompt },
-        { role: "user", content: userMessage },
-      ];
-    } else {
-      const followUp = this.buildFollowUpMessage(repoState, newHandoffs);
-      this.conversationHistory.push({ role: "user", content: followUp });
-    }
-
-    this.manageContext();
-
-    logger.info("Calling LLM for task decomposition", {
+    const isFirstPlan = this.piSession === null;
+    const iterationSpan = this.rootSpan?.child("planner.iteration", { agentId: "planner" });
+    iterationSpan?.setAttributes({
       isFirstPlan,
-      historyMessages: this.conversationHistory.length,
       newHandoffs: newHandoffs.length,
     });
 
+    await this.initSession();
+    const session = this.piSession!.session;
+
+    const prompt = isFirstPlan
+      ? this.buildInitialMessage(request, repoState)
+      : this.buildFollowUpMessage(repoState, newHandoffs);
+
+    logger.info("Prompting Pi session for task decomposition", {
+      isFirstPlan,
+      newHandoffs: newHandoffs.length,
+      promptLength: prompt.length,
+    });
+
     try {
-      let response = await this.llmClient.complete(this.conversationHistory);
-      this.monitor.recordTokenUsage(response.usage.totalTokens);
+      await session.prompt(prompt);
 
-      if (response.finishReason === "length") {
-        logger.warn("LLM response truncated (finish_reason=length), requesting continuation", {
-          completionTokens: response.usage.completionTokens,
-        });
+      const stats = session.getSessionStats();
+      const tokenDelta = stats.tokens.total - this.lastTotalTokens;
+      this.lastTotalTokens = stats.tokens.total;
+      this.monitor.recordTokenUsage(tokenDelta);
 
-        this.conversationHistory.push({ role: "assistant", content: response.content });
-        this.conversationHistory.push({
-          role: "user",
-          content: "Your response was truncated. Continue EXACTLY from where you left off — output only the remaining JSON. Do not restart or repeat.",
-        });
-
-        const continuation = await this.llmClient.complete(this.conversationHistory);
-        this.monitor.recordTokenUsage(continuation.usage.totalTokens);
-
-        this.conversationHistory.pop();
-        this.conversationHistory.pop();
-
-        response = {
-          ...continuation,
-          content: response.content + continuation.content,
-          usage: {
-            promptTokens: response.usage.promptTokens + continuation.usage.promptTokens,
-            completionTokens: response.usage.completionTokens + continuation.usage.completionTokens,
-            totalTokens: response.usage.totalTokens + continuation.usage.totalTokens,
-          },
-        };
-
-        logger.info("Merged continuation response", {
-          totalLength: response.content.length,
-          continuationFinishReason: continuation.finishReason,
-        });
+      const responseText = session.getLastAssistantText();
+      logger.debug("LLM response preview", { length: responseText?.length ?? 0, preview: responseText?.slice(0, 500) });
+      if (!responseText) {
+        logger.warn("Pi session returned no assistant text");
+        iterationSpan?.setStatus("error", "no response text");
+        iterationSpan?.end();
+        return [];
       }
 
-      this.conversationHistory.push({ role: "assistant", content: response.content });
-
-      const { scratchpad, tasks: rawTasks } = this.parsePlannerResponse(response.content);
+      const { scratchpad, tasks: rawTasks } = this.parsePlannerResponse(responseText);
+      logger.debug("Planner scratchpad", { scratchpad: scratchpad.slice(0, 500) });
       if (scratchpad) {
         this.scratchpad = scratchpad;
       }
 
-      const tasks: Task[] = rawTasks.map((raw) => {
+      const allParsedTasks: Task[] = rawTasks.map((raw) => {
         this.taskCounter++;
         const id = raw.id || `task-${String(this.taskCounter).padStart(3, "0")}`;
         return {
@@ -314,16 +311,42 @@ export class Planner {
           description: raw.description,
           scope: raw.scope || [],
           acceptance: raw.acceptance || "",
-          branch: raw.branch || `${this.config.git.branchPrefix}${id}`,
+          branch: raw.branch || `${this.config.git.branchPrefix}${id}-${slugifyForBranch(raw.description)}`,
           status: "pending" as const,
           createdAt: Date.now(),
           priority: raw.priority || 5,
         };
       });
 
+      for (const task of allParsedTasks) {
+        logger.debug("Parsed task from LLM", { id: task.id, description: task.description.slice(0, 200), scope: task.scope, priority: task.priority });
+      }
+
+      const tasks = allParsedTasks.filter((t) => {
+        if (this.dispatchedTaskIds.has(t.id)) {
+          logger.warn("Skipping duplicate task ID from LLM", { taskId: t.id });
+          return false;
+        }
+        return true;
+      });
+
+      if (tasks.length < allParsedTasks.length) {
+        logger.info("Dedup filtered tasks", {
+          before: allParsedTasks.length,
+          after: tasks.length,
+          dropped: allParsedTasks.length - tasks.length,
+        });
+      }
+
+      iterationSpan?.setAttribute("tasksCreated", tasks.length);
+      iterationSpan?.setStatus("ok");
+      iterationSpan?.end();
+
       return tasks;
     } catch (err) {
-      this.conversationHistory = historySnapshot;
+      const error = err instanceof Error ? err : new Error(String(err));
+      iterationSpan?.setStatus("error", error.message);
+      iterationSpan?.end();
       throw err;
     }
   }
@@ -334,14 +357,28 @@ export class Planner {
 
   private buildInitialMessage(request: string, repoState: RepoState): string {
     let msg = `## Request\n${request}\n\n`;
-    msg += `## Repository File Tree\n${repoState.fileTree.join("\n")}\n\n`;
-    msg += `## Recent Commits\n${repoState.recentCommits.join("\n")}\n\n`;
+
+    if (repoState.specMd) {
+      msg += `## SPEC.md (Product Specification)\n${repoState.specMd}\n\n`;
+    }
 
     if (repoState.featuresJson) {
       msg += `## FEATURES.json\n${repoState.featuresJson}\n\n`;
     }
 
-    msg += `This is the initial planning call. Produce your first batch of tasks and your scratchpad.\n`;
+    if (repoState.agentsMd) {
+      msg += `## AGENTS.md (Coding Conventions)\n${repoState.agentsMd}\n\n`;
+    }
+
+    if (repoState.decisionsMd) {
+      msg += `## DECISIONS.md (Architecture Decisions)\n${repoState.decisionsMd}\n\n`;
+    }
+
+    msg += `## Repository File Tree\n${repoState.fileTree.join("\n")}\n\n`;
+    msg += `## Recent Commits\n${repoState.recentCommits.join("\n")}\n\n`;
+
+    msg += `This is the initial planning call. SPEC.md and FEATURES.json above are binding — your tasks must conform to the dependencies, file structure, and features they define. Produce your first batch of tasks and your scratchpad.\n`;
+    logger.debug("Built initial planner prompt", { length: msg.length, hasSpec: !!repoState.specMd, hasFeatures: !!repoState.featuresJson, hasAgents: !!repoState.agentsMd, hasDecisions: !!repoState.decisionsMd, fileTreeSize: repoState.fileTree.length, commitsCount: repoState.recentCommits.length });
     return msg;
   }
 
@@ -354,23 +391,48 @@ export class Planner {
       msg += `## FEATURES.json\n${repoState.featuresJson}\n\n`;
     }
 
+    // DECISIONS.md may be updated by workers between iterations — re-inject fresh copy.
+    if (repoState.decisionsMd) {
+      msg += `## DECISIONS.md (Architecture Decisions)\n${repoState.decisionsMd}\n\n`;
+    }
+
     if (newHandoffs.length > 0) {
       msg += `## New Worker Handoffs (${newHandoffs.length} since last plan)\n`;
       for (const h of newHandoffs) {
         msg += `### Task ${h.taskId} — ${h.status}\n`;
-        msg += `Summary: ${h.summary}\n`;
-        msg += `Files changed: ${h.filesChanged.join(", ")}\n`;
+
+        const summary = h.summary.length > MAX_HANDOFF_SUMMARY_CHARS
+          ? h.summary.slice(0, MAX_HANDOFF_SUMMARY_CHARS) + "…"
+          : h.summary;
+        msg += `Summary: ${summary}\n`;
+
+        const files = h.filesChanged.length > MAX_FILES_PER_HANDOFF
+          ? [...h.filesChanged.slice(0, MAX_FILES_PER_HANDOFF), `... (${h.filesChanged.length - MAX_FILES_PER_HANDOFF} more)`]
+          : h.filesChanged;
+        msg += `Files changed: ${files.join(", ")}\n`;
+
         if (h.concerns.length > 0) msg += `Concerns: ${h.concerns.join("; ")}\n`;
         if (h.suggestions.length > 0) msg += `Suggestions: ${h.suggestions.join("; ")}\n`;
         msg += `\n`;
       }
     }
 
-    if (this.scratchpad) {
-      msg += `## Your Previous Scratchpad\n${this.scratchpad}\n\n`;
+    if (this.activeTasks.size > 0) {
+      msg += `## Currently Active Tasks (${this.activeTasks.size})\n`;
+      for (const id of this.activeTasks) {
+        const t = this.taskQueue.getById(id);
+        if (t) msg += `- ${id}: ${t.description.slice(0, 120)}\n`;
+      }
+      msg += `\n`;
+    }
+
+    if (this.dispatchedTaskIds.size > 0) {
+      msg += `## All Previously Dispatched Task IDs (${this.dispatchedTaskIds.size})\n`;
+      msg += `DO NOT re-emit any of these IDs: ${[...this.dispatchedTaskIds].join(", ")}\n\n`;
     }
 
     msg += `Continue planning. Review the new handoffs and current state. Rewrite your scratchpad and emit the next batch of tasks.\n`;
+    logger.debug("Built follow-up planner prompt", { length: msg.length, newHandoffs: newHandoffs.length, activeTasks: this.activeTasks.size, dispatchedIds: this.dispatchedTaskIds.size });
     return msg;
   }
 
@@ -506,101 +568,22 @@ export class Planner {
   }
 
   // ---------------------------------------------------------------------------
-  // Context management (compaction)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * When conversation history approaches the context limit, compact older
-   * exchanges into a summary message while keeping system + initial + recent.
-   *
-   * Strategy: keep system[0], initial user[1], initial assistant[2], then
-   * summarize middle exchanges, and keep the most recent N messages intact.
-   */
-  private manageContext(): void {
-    const totalChars = this.conversationHistory.reduce((sum, m) => sum + m.content.length, 0);
-
-    if (totalChars <= CONTEXT_CHAR_LIMIT) return;
-
-    logger.info("Context limit approaching, compacting older messages", {
-      totalChars,
-      limit: CONTEXT_CHAR_LIMIT,
-      messageCount: this.conversationHistory.length,
-    });
-
-    // Need at least: system + initial user + initial assistant + summary + recent messages
-    if (this.conversationHistory.length <= 3 + RECENT_MESSAGES_TO_KEEP) return;
-
-    const system = this.conversationHistory[0];
-    const initialUser = this.conversationHistory[1];
-    const initialAssistant = this.conversationHistory[2];
-
-    const middleStart = 3;
-    const middleEnd = this.conversationHistory.length - RECENT_MESSAGES_TO_KEEP;
-
-    if (middleEnd <= middleStart) return;
-
-    const middleMessages = this.conversationHistory.slice(middleStart, middleEnd);
-
-    // Build compact summary — extract signal, drop verbose content.
-    const summaryParts: string[] = [];
-    let handoffsDelivered = 0;
-    let tasksGenerated = 0;
-
-    for (const msg of middleMessages) {
-      if (msg.role === "user") {
-        const handoffMatch = msg.content.match(/New Worker Handoffs \((\d+)/);
-        if (handoffMatch) {
-          handoffsDelivered += parseInt(handoffMatch[1], 10);
-        }
-      } else if (msg.role === "assistant") {
-        const taskIdMatches = msg.content.match(/"id"\s*:/g);
-        if (taskIdMatches) {
-          tasksGenerated += taskIdMatches.length;
-        }
-      }
-    }
-
-    summaryParts.push(`Compacted ${middleMessages.length} earlier messages.`);
-    summaryParts.push(`~${handoffsDelivered} handoffs delivered, ~${tasksGenerated} tasks generated in compacted range.`);
-    if (this.scratchpad) {
-      summaryParts.push(`Current scratchpad has the latest synthesized state.`);
-    }
-
-    const summaryMessage: LLMMessage = {
-      role: "user",
-      content: `[CONTEXT COMPACTION]\n${summaryParts.join("\n")}`,
-    };
-
-    const recentMessages = this.conversationHistory.slice(middleEnd);
-
-    this.conversationHistory = [
-      system,
-      initialUser,
-      initialAssistant,
-      summaryMessage,
-      ...recentMessages,
-    ];
-
-    const newTotalChars = this.conversationHistory.reduce((sum, m) => sum + m.content.length, 0);
-    logger.info("Context compacted", {
-      removedMessages: middleMessages.length,
-      oldChars: totalChars,
-      newChars: newTotalChars,
-      messageCount: this.conversationHistory.length,
-    });
-  }
-
-  // ---------------------------------------------------------------------------
   // Task dispatch
   // ---------------------------------------------------------------------------
 
   private dispatchTasks(tasks: Task[]): void {
     for (const task of tasks) {
+      if (this.activeTasks.has(task.id) || this.dispatchedTaskIds.has(task.id)) {
+        logger.warn("Skipping already-dispatched task", { taskId: task.id });
+        continue;
+      }
+
       this.taskQueue.enqueue(task);
       for (const cb of this.taskCreatedCallbacks) {
         cb(task);
       }
 
+      this.dispatchedTaskIds.add(task.id);
       this.activeTasks.add(task.id);
       this.dispatchSingleTask(task);
     }
@@ -608,21 +591,47 @@ export class Planner {
 
   /** Fire-and-forget: dispatches task to a worker, pushes result to pendingHandoffs on completion. */
   private dispatchSingleTask(task: Task): void {
+    const dispatchSpan = this.rootSpan?.child("planner.dispatchTask", { taskId: task.id, agentId: "planner" });
     const promise = (async () => {
+      logger.debug("Awaiting dispatch slot", { taskId: task.id, activeSlots: this.dispatchLimiter.getActive(), queuedWaiting: this.dispatchLimiter.getQueueLength() });
       await this.dispatchLimiter.acquire();
 
-      // No local branch creation — branches are created inside sandboxes
-      // and pushed to remote. Merge queue fetches from origin.
-
-      this.taskQueue.assignTask(task.id, `ephemeral-${task.id}`);
-      this.taskQueue.startTask(task.id);
+      const current = this.taskQueue.getById(task.id);
+      if (current && current.status !== "pending") {
+        logger.warn("Task already dispatched (post-limiter check), skipping", {
+          taskId: task.id,
+          status: current.status,
+        });
+        this.dispatchLimiter.release();
+        this.activeTasks.delete(task.id);
+        dispatchSpan?.end();
+        return;
+      }
 
       try {
-        const handoff = await this.workerPool.assignTask(task);
+        let handoff: Handoff;
+
+        if (this.subplanner && shouldDecompose(task, DEFAULT_SUBPLANNER_CONFIG, 0)) {
+          logger.info("Task scope is complex — routing through subplanner", {
+            taskId: task.id,
+            scopeSize: task.scope.length,
+          });
+          this.taskQueue.assignTask(task.id, "subplanner");
+          this.taskQueue.startTask(task.id);
+          handoff = await this.subplanner.decomposeAndExecute(task, 0, dispatchSpan);
+        } else {
+          this.taskQueue.assignTask(task.id, `ephemeral-${task.id}`);
+          this.taskQueue.startTask(task.id);
+          handoff = await this.workerPool.assignTask(task);
+        }
 
         if (handoff.filesChanged.length === 0) {
           const workerId = this.taskQueue.getById(task.id)?.assignedTo || "unknown";
           this.monitor.recordEmptyDiff(workerId, task.id);
+        }
+
+        if (handoff.metrics.tokensUsed === 0 && handoff.metrics.toolCallCount === 0) {
+          this.monitor.recordSuspiciousTask(task.id, "0 tokens and 0 tool calls");
         }
 
         if (handoff.status === "complete") {
@@ -638,6 +647,7 @@ export class Planner {
         }
 
         this.pendingHandoffs.push({ task, handoff });
+        dispatchSpan?.setStatus("ok");
       } catch (error) {
         this.taskQueue.failTask(task.id);
         const err = error instanceof Error ? error : new Error(String(error));
@@ -662,9 +672,11 @@ export class Planner {
           },
         };
         this.pendingHandoffs.push({ task, handoff: failureHandoff });
+        dispatchSpan?.setStatus("error", err.message);
       } finally {
         this.dispatchLimiter.release();
         this.activeTasks.delete(task.id);
+        dispatchSpan?.end();
       }
     })();
 
@@ -693,6 +705,7 @@ export class Planner {
         this.mergeQueue.enqueue(task.branch);
       }
 
+      logger.debug("Handoff details", { taskId: task.id, status: handoff.status, diffSize: handoff.diff.length, summary: handoff.summary.slice(0, 300), concerns: handoff.concerns, suggestions: handoff.suggestions });
       logger.info("Collected handoff", {
         taskId: task.id,
         status: handoff.status,
@@ -711,10 +724,16 @@ export class Planner {
    * without going through the LLM planning cycle.
    */
   injectTask(task: Task): void {
+    if (this.activeTasks.has(task.id) || this.dispatchedTaskIds.has(task.id)) {
+      logger.warn("Skipping duplicate injected task", { taskId: task.id });
+      return;
+    }
+
     this.taskQueue.enqueue(task);
     for (const cb of this.taskCreatedCallbacks) {
       cb(task);
     }
+    this.dispatchedTaskIds.add(task.id);
     this.activeTasks.add(task.id);
     this.dispatchSingleTask(task);
     logger.info("Injected external task", { taskId: task.id });
