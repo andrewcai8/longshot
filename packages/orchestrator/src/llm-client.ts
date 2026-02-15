@@ -14,6 +14,7 @@ export interface LLMResponse {
     completionTokens: number;
     totalTokens: number;
   };
+  finishReason: string;
   endpoint: string;
   latencyMs: number;
 }
@@ -43,6 +44,7 @@ interface ChatCompletionResponse {
     message: {
       content: string;
     };
+    finish_reason?: string;
   }>;
   usage?: {
     prompt_tokens: number;
@@ -227,6 +229,7 @@ export class LLMClient {
         completionTokens: data.usage?.completion_tokens ?? 0,
         totalTokens: data.usage?.total_tokens ?? 0,
       },
+      finishReason: data.choices[0].finish_reason ?? "unknown",
       endpoint: state.config.name,
       latencyMs,
     };
@@ -293,6 +296,40 @@ export class LLMClient {
       totalRequests: s.totalRequests,
       totalFailures: s.totalFailures,
     }));
+  }
+
+  async waitForReady(options?: { maxWaitMs?: number; pollIntervalMs?: number }): Promise<void> {
+    const maxWait = options?.maxWaitMs ?? 120_000;
+    const pollInterval = options?.pollIntervalMs ?? 5_000;
+    const deadline = Date.now() + maxWait;
+
+    while (Date.now() < deadline) {
+      for (const state of this.states) {
+        try {
+          const res = await fetch(`${state.config.endpoint}/v1/models`, {
+            headers: state.config.apiKey ? { Authorization: `Bearer ${state.config.apiKey}` } : {},
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (res.ok) {
+            logger.info(`Endpoint ${state.config.name} is ready`);
+            return;
+          }
+        } catch {
+          // Endpoint not ready yet — expected during cold start.
+        }
+      }
+
+      const remainingSec = Math.round((deadline - Date.now()) / 1000);
+      logger.info("Waiting for LLM endpoint(s) to become ready…", {
+        retryIn: `${pollInterval / 1000}s`,
+        timeoutIn: `${remainingSec}s`,
+      });
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+
+    throw new Error(
+      `LLM readiness probe timed out after ${maxWait / 1000}s — no endpoints became available`,
+    );
   }
 
   get totalRequests(): number {
