@@ -123,13 +123,29 @@ export async function mergeBranch(
       }
 
       case "rebase": {
-        // Checkout source, rebase onto target, then checkout target and merge --ff-only
-        await execFileAsync("git", ["checkout", source], { cwd: workDir });
+        // Clean up stale rebase state from a previous interrupted operation
+        try { await execFileAsync("git", ["rebase", "--abort"], { cwd: workDir }); } catch { /* no stale rebase */ }
+
+        const tmpBranch = `tmp-rebase-${Date.now()}`;
+        try {
+          await execFileAsync("git", ["checkout", "-b", tmpBranch, source], { cwd: workDir });
+        } catch (error) {
+          // Source ref doesn't exist or checkout failed
+          const errMsg = error instanceof Error ? error.message : String(error);
+          return {
+            success: false,
+            message: `Failed to checkout source for rebase: ${errMsg}`,
+          };
+        }
         try {
           await execFileAsync("git", ["rebase", targetBranch], { cwd: workDir });
-          // Now fast-forward merge the rebased source into target
+          // Fast-forward merge the rebased temp branch into target
           await execFileAsync("git", ["checkout", targetBranch], { cwd: workDir });
-          await execFileAsync("git", ["merge", "--ff-only", source], { cwd: workDir });
+          await execFileAsync("git", ["merge", "--ff-only", tmpBranch], { cwd: workDir });
+          // Clean up temp branch
+          try {
+            await execFileAsync("git", ["branch", "-D", tmpBranch], { cwd: workDir });
+          } catch { /* best effort cleanup */ }
           return {
             success: true,
             message: `Successfully rebased ${source} onto ${targetBranch}`,
@@ -137,15 +153,20 @@ export async function mergeBranch(
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           // Check for rebase conflicts
-          if (errMsg.includes("fatal: could not apply") || errMsg.includes("CONFLICT")) {
-            await execFileAsync("git", ["rebase", "--abort"], { cwd: workDir });
-            await execFileAsync("git", ["checkout", currentBranch], { cwd: workDir });
+          if (errMsg.includes("could not apply") || errMsg.includes("CONFLICT")) {
+            try { await execFileAsync("git", ["rebase", "--abort"], { cwd: workDir }); } catch { /* ignore */ }
+            try { await execFileAsync("git", ["checkout", currentBranch], { cwd: workDir }); } catch { /* ignore */ }
+            try { await execFileAsync("git", ["branch", "-D", tmpBranch], { cwd: workDir }); } catch { /* ignore */ }
             return {
               success: false,
               conflicted: true,
               message: "Rebase conflict occurred",
             };
           }
+          // Non-conflict failure — abort any in-progress rebase before cleanup
+          try { await execFileAsync("git", ["rebase", "--abort"], { cwd: workDir }); } catch { /* ignore */ }
+          try { await execFileAsync("git", ["checkout", currentBranch], { cwd: workDir }); } catch { /* ignore */ }
+          try { await execFileAsync("git", ["branch", "-D", tmpBranch], { cwd: workDir }); } catch { /* ignore */ }
           throw error;
         }
       }
