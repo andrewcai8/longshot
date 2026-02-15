@@ -40,6 +40,7 @@ export class WorkerPool {
   private taskCompleteCallbacks: ((handoff: Handoff) => void)[];
   private workerFailedCallbacks: ((taskId: string, error: Error) => void)[];
   private activeToolCalls: Map<string, number>;
+  private timedOutBranches: string[] = [];
 
   constructor(
     config: {
@@ -115,7 +116,7 @@ export class WorkerPool {
     logger.debug("Sandbox payload prepared", { taskId: task.id, endpointName: endpoint.name, model: this.config.llm.model, payloadSize: payload.length, hasTraceCtx: !!traceCtx });
 
     try {
-      const handoff = await this.runSandboxStreaming(task.id, payload, workerSpan);
+      const handoff = await this.runSandboxStreaming(task.id, task.branch, payload, workerSpan);
 
       for (const cb of this.taskCompleteCallbacks) {
         cb(handoff);
@@ -152,7 +153,7 @@ export class WorkerPool {
     }
   }
 
-  private runSandboxStreaming(taskId: string, payload: string, workerSpan?: Span): Promise<Handoff> {
+  private runSandboxStreaming(taskId: string, branchName: string, payload: string, workerSpan?: Span): Promise<Handoff> {
     return new Promise<Handoff>((resolve, reject) => {
       const proc = spawn(
         this.config.pythonPath,
@@ -174,8 +175,10 @@ export class WorkerPool {
         if (settled) return;
         settled = true;
         proc.kill("SIGKILL");
+        this.timedOutBranches.push(branchName);
         logger.error("Worker timed out", {
           taskId,
+          branch: branchName,
           timeoutSec: this.config.workerTimeout,
         });
         reject(
@@ -320,6 +323,16 @@ export class WorkerPool {
       total += count;
     }
     return total;
+  }
+
+  getTimedOutBranches(): string[] {
+    return [...this.timedOutBranches];
+  }
+
+  drainTimedOutBranches(): string[] {
+    const branches = this.timedOutBranches;
+    this.timedOutBranches = [];
+    return branches;
   }
 
   onTaskComplete(callback: (handoff: Handoff) => void): void {

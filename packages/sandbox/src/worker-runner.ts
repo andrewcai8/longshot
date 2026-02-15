@@ -278,6 +278,20 @@ export async function runWorker(): Promise<void> {
     log("Skipping safety-net commit — agent produced no work.");
   }
 
+  let buildExitCode: number | null = null;
+  if (!isEmptyResponse && existsSync(`${WORK_DIR}/tsconfig.json`)) {
+    log("Running post-agent build check (tsc --noEmit)...");
+    try {
+      execSync("npx tsc --noEmit", { cwd: WORK_DIR, encoding: "utf-8", timeout: 60_000 });
+      buildExitCode = 0;
+      log("Post-agent build check: PASS");
+    } catch (buildErr: unknown) {
+      const code = (buildErr as { status?: number }).status;
+      buildExitCode = code ?? 1;
+      log(`Post-agent build check: FAIL (exit code ${buildExitCode})`);
+    }
+  }
+
   log("Extracting git diff stats...");
   const diff = safeExec(`git diff ${startSha} --no-color -- . ':!node_modules'`, WORK_DIR);
   const numstat = safeExec(`git diff ${startSha} --numstat`, WORK_DIR);
@@ -317,10 +331,13 @@ export async function runWorker(): Promise<void> {
     filesChanged,
     concerns: isEmptyResponse
       ? ["Empty LLM response — possible API failure or model endpoint issue"]
-      : [],
+      : (buildExitCode !== null && buildExitCode !== 0
+          ? [`Post-agent build check failed (tsc exit code ${buildExitCode})`]
+          : []),
     suggestions: isEmptyResponse
       ? ["Check LLM endpoint connectivity", "Verify model is available in sandbox environment"]
       : [],
+    buildExitCode,
     metrics: {
       linesAdded,
       linesRemoved,
