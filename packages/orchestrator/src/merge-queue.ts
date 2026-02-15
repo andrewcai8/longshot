@@ -21,6 +21,11 @@ export interface MergeQueueResult {
   conflicts?: string[];
 }
 
+export interface MergeConflictInfo {
+  branch: string;
+  conflictingFiles: string[];
+}
+
 export interface MergeStats {
   totalMerged: number;
   totalSkipped: number;
@@ -54,6 +59,7 @@ export class MergeQueue {
   private backgroundTimer: ReturnType<typeof setTimeout> | null;
   private backgroundRunning: boolean;
   private mergeResultCallbacks: ((result: MergeQueueResult) => void)[];
+  private conflictCallbacks: ((info: MergeConflictInfo) => void)[];
 
   constructor(config: {
     mergeStrategy: MergeStrategy;
@@ -77,6 +83,7 @@ export class MergeQueue {
     this.backgroundTimer = null;
     this.backgroundRunning = false;
     this.mergeResultCallbacks = [];
+    this.conflictCallbacks = [];
   }
 
   enqueue(branch: string): void {
@@ -154,6 +161,10 @@ export class MergeQueue {
     this.mergeResultCallbacks.push(callback);
   }
 
+  onConflict(callback: (info: MergeConflictInfo) => void): void {
+    this.conflictCallbacks.push(callback);
+  }
+
   async processQueue(): Promise<MergeQueueResult[]> {
     const results: MergeQueueResult[] = [];
 
@@ -188,7 +199,12 @@ export class MergeQueue {
 
       await checkoutBranch(this.mainBranch, cwd);
 
-      const result = await coreMergeBranch(branch, this.mainBranch, this.mergeStrategy, cwd);
+      // After fetch, the branch exists as a remote tracking ref (origin/<branch>).
+      // git merge cannot resolve bare branch names like "worker/task-049" to their
+      // remote tracking counterparts — it only checks refs/heads/. We must use the
+      // explicit origin/ prefix so git resolves refs/remotes/origin/<branch>.
+      const mergeRef = `origin/${branch}`;
+      const result = await coreMergeBranch(mergeRef, this.mainBranch, this.mergeStrategy, cwd);
 
       if (result.success) {
         this.merged.add(branch);
@@ -203,6 +219,11 @@ export class MergeQueue {
 
         this.stats.totalConflicts++;
         logger.warn(`Merge conflict on branch ${branch}: ${conflicts.length} conflicting files`);
+
+        for (const cb of this.conflictCallbacks) {
+          cb({ branch, conflictingFiles: conflicts });
+        }
+
         return {
           success: false,
           status: "conflict",

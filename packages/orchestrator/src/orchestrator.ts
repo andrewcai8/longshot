@@ -1,8 +1,5 @@
 /**
  * Orchestrator Factory — creates and wires all components.
- *
- * Used by both main.ts (standalone CLI) and the Pi extension.
- * Keeps wiring logic in one place so the extension doesn't duplicate it.
  */
 
 import { readFile } from "node:fs/promises";
@@ -13,6 +10,7 @@ import { loadConfig, type OrchestratorConfig } from "./config.js";
 import { TaskQueue } from "./task-queue.js";
 import { WorkerPool } from "./worker-pool.js";
 import { MergeQueue } from "./merge-queue.js";
+import { GitMutex } from "./shared.js";
 import { Monitor } from "./monitor.js";
 import { Planner } from "./planner.js";
 import { Reconciler } from "./reconciler.js";
@@ -235,6 +233,33 @@ export async function createOrchestrator(
           success: result.success,
         });
       });
+
+      let conflictCounter = 0;
+      mergeQueue.onConflict((info) => {
+        conflictCounter++;
+        const fixId = `conflict-fix-${String(conflictCounter).padStart(3, "0")}`;
+        const fixTask: Task = {
+          id: fixId,
+          description: `Resolve merge conflict from branch "${info.branch}". Conflicting files: ${info.conflictingFiles.join(", ")}. ` +
+            `Open each file, find <<<<<<< / ======= / >>>>>>> blocks, resolve by keeping the correct version based on surrounding code context. ` +
+            `Remove all conflict markers. Ensure the file compiles after resolution.`,
+          scope: info.conflictingFiles.slice(0, 5),
+          acceptance: `No <<<<<<< markers remain in the affected files. tsc --noEmit returns 0 for these files.`,
+          branch: `${config.git.branchPrefix}${fixId}`,
+          status: "pending",
+          createdAt: Date.now(),
+          priority: 1,
+        };
+
+        logger.info("Creating conflict-resolution task", {
+          fixId,
+          branch: info.branch,
+          conflictingFiles: info.conflictingFiles,
+        });
+
+        planner.injectTask(fixTask);
+      });
+
       logger.info("Orchestrator started");
     },
 
