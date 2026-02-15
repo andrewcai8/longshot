@@ -3,6 +3,35 @@ import { resolve } from "node:path";
 import { LogEntry, AgentRole } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// Log level ordering — lower number = more verbose
+// ---------------------------------------------------------------------------
+
+const LOG_LEVEL_ORDER = { debug: 0, info: 1, warn: 2, error: 3 } as const;
+type LogLevel = keyof typeof LOG_LEVEL_ORDER;
+
+/**
+ * Resolve the effective stdout log level from the LOG_LEVEL env var.
+ * Defaults to "info" — debug messages go to file only unless LOG_LEVEL=debug.
+ */
+function resolveLogLevel(): LogLevel {
+  const raw = (process.env.LOG_LEVEL || "info").toLowerCase().trim();
+  if (raw in LOG_LEVEL_ORDER) return raw as LogLevel;
+  return "info";
+}
+
+let stdoutMinLevel: LogLevel = resolveLogLevel();
+
+/** Programmatically override the stdout log level (e.g. from config). */
+export function setLogLevel(level: LogLevel): void {
+  stdoutMinLevel = level;
+}
+
+/** Get the current stdout log level. */
+export function getLogLevel(): LogLevel {
+  return stdoutMinLevel;
+}
+
+// ---------------------------------------------------------------------------
 // LogWriter — singleton that tees NDJSON lines to a file in logs/
 // ---------------------------------------------------------------------------
 
@@ -102,8 +131,14 @@ export class Logger {
       data,
     };
     const line = JSON.stringify(entry);
-    process.stdout.write(line + "\n");
+
+    // Always write to file (all levels)
     logWriter.write(line);
+
+    // Only write to stdout if level meets the threshold
+    if (LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[stdoutMinLevel]) {
+      process.stdout.write(line + "\n");
+    }
   }
 }
 
