@@ -408,6 +408,16 @@ class DashboardState:
                 label = "all green" if ok else "NEEDS FIX"
                 self._feed(ts_str, f"  sweep: {label}", "green" if ok else "red")
 
+            # -- Worker progress (streamed from Modal sandboxes) ----------
+            elif msg == "Worker progress":
+                task_id = data.get("taskId", "")
+                phase = data.get("phase", "")
+                detail = (data.get("detail") or "")[:60]
+                if phase == "sandbox":
+                    self._feed(ts_str, f"  \u2699 {task_id}  {detail}", "cyan")
+                else:
+                    self._feed(ts_str, f"  \u25b8 {task_id}  {detail}", "dim")
+
             # -- Timeouts / errors ------------------------------------------
             elif msg == "Worker timed out":
                 tid = data.get("taskId", "")
@@ -882,6 +892,42 @@ def reader_stdin(q: queue.Queue[Any]):
         q.put(None)
 
 
+def reader_replay(filepath: str, speed: float, q: queue.Queue[Any]):
+    """Replay an NDJSON log file, preserving original timestamp deltas."""
+    try:
+        with open(filepath) as f:
+            lines = f.readlines()
+
+        events: list[tuple[int, dict[str, Any]]] = []
+        for raw in lines:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                ev = json.loads(raw)
+                ts = ev.get("timestamp", 0)
+                events.append((ts, ev))
+            except json.JSONDecodeError:
+                continue
+
+        if not events:
+            q.put(None)
+            return
+
+        base_ts = events[0][0]
+        wall_start = time.time()
+
+        for ts, ev in events:
+            delta_s = (ts - base_ts) / 1000.0
+            target_wall = wall_start + delta_s / speed
+            wait = target_wall - time.time()
+            if wait > 0:
+                time.sleep(wait)
+            q.put(ev)
+    finally:
+        q.put(None)
+
+
 # ---------------------------------------------------------------------------
 # Demo data generator
 # ---------------------------------------------------------------------------
@@ -1152,11 +1198,15 @@ def main():
     ap = argparse.ArgumentParser(description="AgentSwarm Rich Terminal Dashboard")
     ap.add_argument("--demo", action="store_true", help="Synthetic data mode")
     ap.add_argument("--stdin", action="store_true", help="Read NDJSON from stdin")
+    ap.add_argument("--replay", type=str, default=None, metavar="FILE",
+                     help="Replay an NDJSON log file at original speed")
+    ap.add_argument("--speed", type=float, default=1.0,
+                     help="Replay speed multiplier (default 1.0, e.g. 10 = 10x faster)")
     ap.add_argument("--agents", type=int, default=100, help="Max agent slots (default 100)")
     ap.add_argument("--features", type=int, default=200, help="Total features (default 200)")
     ap.add_argument("--hz", type=int, default=2, help="Refresh rate Hz (default 2)")
     ap.add_argument("--cost-rate", type=float, default=COST_PER_1K,
-                    help="$/1K tokens for cost estimate")
+                     help="$/1K tokens for cost estimate")
     args = ap.parse_args()
 
     console = Console()
@@ -1164,7 +1214,10 @@ def main():
     dq: queue.Queue[Any] = queue.Queue()
 
     # start reader thread
-    if args.demo:
+    if args.replay:
+        thr = threading.Thread(target=reader_replay,
+                               args=(args.replay, args.speed, dq), daemon=True)
+    elif args.demo:
         thr = threading.Thread(target=demo_generator,
                                args=(dq, args.agents, args.features), daemon=True)
     elif args.stdin:
@@ -1179,7 +1232,7 @@ def main():
     thr.start()
 
     layout = make_layout()
-    interactive_zoom = not args.stdin and sys.stdin.isatty()
+    interactive_zoom = sys.stdin.isatty() and not args.stdin
 
     try:
         with KeyPoller(interactive_zoom) as key_poller:
