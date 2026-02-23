@@ -99,7 +99,7 @@ video {
 
 .hero {
   background-color: var(--bg-dark);
-  padding: clamp(5rem, 14vh, 12rem) 2rem clamp(4rem, 10vh, 10rem);
+  padding: clamp(3rem, 8vh, 7rem) 2rem clamp(3rem, 8vh, 7rem);
 }
 
 .hero__inner {
@@ -125,7 +125,7 @@ video {
   font-weight: 300;
   color: rgba(255, 255, 255, 0.85);
   letter-spacing: 0.01em;
-  margin-bottom: clamp(3rem, 6vh, 5rem);
+  margin-bottom: clamp(1.5rem, 3vh, 2.5rem);
 }
 
 .hero__video-wrap {
@@ -138,7 +138,9 @@ video {
 
 .hero__video {
   width: 100%;
+  aspect-ratio: 16 / 9;
   display: block;
+  border: none;
 }
 
 /* =========================================================
@@ -171,6 +173,32 @@ video {
 .arch__img {
   width: 100%;
   border-radius: 2px;
+}
+
+
+/* =========================================================
+   Hero — Contribute CTA
+   ========================================================= */
+.hero__contribute {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: clamp(0.8rem, 1vw, 0.95rem);
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 100px;
+  padding: 0.55em 1.6em;
+  margin-bottom: clamp(1.5rem, 3vh, 2.5rem);
+  transition:
+    color 0.3s var(--ease-out),
+    border-color 0.3s var(--ease-out);
+  }
+
+.hero__contribute:hover {
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 /* =========================================================
