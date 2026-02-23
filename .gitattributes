@@ -1,2 +1,0 @@
-landing/public/longshot_demo.mp4 filter=lfs diff=lfs merge=lfs -text
-landing/public/*.png filter=lfs diff=lfs merge=lfs -text
